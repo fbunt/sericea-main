@@ -15,6 +15,7 @@ rpm-ostree install \
     gparted \
     mediawriter \
     neovim \
+    power-profiles-daemon \
     powertop
 
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
