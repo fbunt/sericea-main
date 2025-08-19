@@ -13,6 +13,7 @@ RELEASE="$(rpm -E %fedora)"
 # https://mirrors.rpmfusion.org/mirrorlist?path=free/fedora/updates/39/x86_64/repoview/index.html&protocol=https&redirect=1
 rpm-ostree install \
     gparted \
+    keychain \
     mediawriter \
     neovim \
     powertop
