@@ -14,8 +14,12 @@ RELEASE="$(rpm -E %fedora)"
 rpm-ostree install \
     gparted \
     keychain \
+    libvirt \
     mediawriter \
     neovim \
-    powertop
+    powertop \
+    qemu-img \
+    qemu-kvm \
+    virt-manager
 
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
