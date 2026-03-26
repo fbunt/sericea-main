@@ -22,6 +22,7 @@ rpm-ostree install \
     mediawriter \
     neovim \
     powertop \
+    tio \
     qemu-img \
     qemu-kvm \
     virt-manager
