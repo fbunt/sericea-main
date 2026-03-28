@@ -23,6 +23,7 @@ rpm-ostree install \
     mediawriter \
     neovim \
     powertop \
+    systemd-devel \
     tio \
     qemu-img \
     qemu-kvm \
