@@ -16,6 +16,7 @@ rpm-ostree install \
     docker-cli \
     docker-compose \
     docker-compose-switch \
+    gh \
     gparted \
     keychain \
     libvirt \
