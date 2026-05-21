@@ -11,20 +11,49 @@ rpm-ostree install \
     "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm"
 
 
+### Swap Fedora's patent-stripped media stack for RPMfusion's full versions
+# Fedora ships "-free" variants of ffmpeg, gstreamer, mesa va/vulkan, fdk-aac,
+# and libheif that omit patent-encumbered codecs (H.264/HEVC encode, AAC,
+# AC-3, MP3 encode, etc). Replace them with the RPMfusion equivalents.
+rpm-ostree override remove \
+    ffmpeg-free \
+    libavcodec-free \
+    libavdevice-free \
+    libavfilter-free \
+    libavformat-free \
+    libavutil-free \
+    libpostproc-free \
+    libswresample-free \
+    libswscale-free \
+    mesa-va-drivers \
+    mesa-vulkan-drivers \
+    --install=ffmpeg \
+    --install=ffmpeg-libs \
+    --install=libavcodec-freeworld \
+    --install=mesa-va-drivers-freeworld \
+    --install=mesa-vulkan-drivers-freeworld
+
+
+### Additive RPMfusion codec packages
+# These coexist alongside their Fedora -free counterparts and add patent-
+# encumbered codec support (AAC encode, HEIF/HEVC decode, MP3, etc).
+rpm-ostree install \
+    gstreamer1-plugins-bad-freeworld \
+    gstreamer1-plugins-ugly \
+    libheif-freeworld
+
+
 ### ublue sway-atomic-main overlay
 # Recreates the package set the discontinued ghcr.io/ublue-os/sway-atomic-main
 # layered on top of Fedora's sway-atomic image. Source: ublue-os/main@4d1a14d
 # packages.json — "all"."all" + "all"."sway-atomic".
 rpm-ostree install \
     alsa-firmware \
-    android-udev-rules \
     apr \
     apr-util \
     clipman \
     distrobox \
     fdk-aac \
-    ffmpeg \
-    ffmpeg-libs \
     ffmpegthumbnailer \
     flatpak-spawn \
     fuse \
@@ -39,12 +68,10 @@ rpm-ostree install \
     htop \
     intel-vaapi-driver \
     just \
-    libavcodec \
     libcamera \
     libcamera-tools \
     libcamera-gstreamer \
     libcamera-ipa \
-    libfdk-aac \
     libheif \
     libratbag-ratbagd \
     libva-utils \
@@ -55,11 +82,9 @@ rpm-ostree install \
     nvtop \
     openrgb-udev-rules \
     openssl \
-    oversteer-udev \
     pam-u2f \
     pam_yubico \
     pamu2fcfg \
-    pipewire-libs-extra \
     pipewire-plugin-libcamera \
     powerstat \
     smartmontools \
