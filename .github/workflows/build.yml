@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - main
+      - sway-atomic
     paths-ignore:
       - '**/README.md'
   workflow_dispatch:
@@ -40,40 +41,23 @@ jobs:
         id: generate-tags
         shell: bash
         run: |
-          # Generate a timestamp for creating an image version history
           TIMESTAMP="$(date +%Y%m%d)"
-          COMMIT_TAGS=()
-          BUILD_TAGS=()
-
-          # Have tags for tracking builds during pull request
           SHA_SHORT="${GITHUB_SHA::7}"
-          COMMIT_TAGS+=("pr-${{ github.event.number }}")
-          COMMIT_TAGS+=("${SHA_SHORT}")
-
-          # Append matching timestamp tags to keep a version history
-          for TAG in "${BUILD_TAGS[@]}"; do
-              BUILD_TAGS+=("${TAG}-${TIMESTAMP}")
-          done
-
-          BUILD_TAGS+=("${TIMESTAMP}")
-          BUILD_TAGS+=("latest")
+          # Sanitize branch name for use as an image tag (/ -> -).
+          BRANCH="${GITHUB_REF_NAME//\//-}"
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              echo "Generated the following commit tags: "
-              for TAG in "${COMMIT_TAGS[@]}"; do
-                  echo "${TAG}"
-              done
-
-              alias_tags=("${COMMIT_TAGS[@]}")
+              alias_tags=("pr-${{ github.event.number }}" "${SHA_SHORT}")
+          elif [[ "${BRANCH}" == "main" ]]; then
+              alias_tags=("${TIMESTAMP}" "latest")
           else
-              alias_tags=("${BUILD_TAGS[@]}")
+              # Non-main branch push: keep tags branch-scoped so they can't
+              # clobber main's :latest / bare timestamp.
+              alias_tags=("${BRANCH}" "${BRANCH}-${SHA_SHORT}" "${BRANCH}-${TIMESTAMP}")
           fi
 
-          echo "Generated the following build tags: "
-          for TAG in "${BUILD_TAGS[@]}"; do
-              echo "${TAG}"
-          done
-
+          echo "Generated the following tags:"
+          printf '  %s\n' "${alias_tags[@]}"
           echo "alias_tags=${alias_tags[*]}" >> $GITHUB_OUTPUT
 
       # Build metadata
@@ -142,12 +126,26 @@ jobs:
       # Sign container
       - uses: sigstore/cosign-installer@v4.1.2
         if: github.event_name != 'pull_request'
+        with:
+          # Pin to cosign v2.x. cosign v3 (the installer's current default)
+          # writes signatures as OCI 1.1 referrers in the new sigstore-bundle
+          # format, which Fedora's containers/image (use-sigstore-attachments,
+          # used by rpm-ostree/skopeo) cannot read — verified pulls fail with
+          # "A signature was required, but no signature exists". v2.x writes the
+          # legacy sha256-<digest>.sig tag attachment that the verifier expects.
+          cosign-release: 'v2.4.1'
 
       - name: Sign container image
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign -y --key env://COSIGN_PRIVATE_KEY ${{ steps.registry_case.outputs.lowercase }}/${{ steps.build_image.outputs.image }}@${TAGS}
+          set -euo pipefail
+          IMAGE="${{ steps.registry_case.outputs.lowercase }}/${{ steps.build_image.outputs.image }}"
+          # Sign by a tag reference and let cosign resolve it to the digest the
+          # registry actually serves. Passing ${{ steps.push.outputs.digest }}
+          # here put signatures on a digest consumers never pull, so verified
+          # pulls failed with "no signature exists".
+          read -r TAG _ <<< "${{ steps.build_image.outputs.tags }}"
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY "${IMAGE}:${TAG}"
         env:
-          TAGS: ${{ steps.push.outputs.digest }}
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
