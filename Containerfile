@@ -6,7 +6,7 @@
 
 ARG SOURCE_REGISTRY="quay.io/fedora-ostree-desktops"
 ARG SOURCE_IMAGE="sway-atomic"
-ARG SOURCE_TAG="42"
+ARG SOURCE_TAG="43"
 
 
 ### 2. SOURCE IMAGE
