@@ -134,15 +134,34 @@ docker:
     use-sigstore-attachments: true
 EOF
 
-# Require a valid cosign signature for this repo; everything else keeps the
-# base image's default policy.
-jq --arg repo "${IMAGE_REPO}" \
-   '.transports.docker[$repo] = [{
-       "type": "sigstoreSigned",
-       "keyPath": "/etc/pki/containers/sericea-main.pub",
-       "signedIdentity": {"type": "matchRepository"}
-   }]' \
-   /etc/containers/policy.json > /tmp/policy.json
-mv /tmp/policy.json /etc/containers/policy.json
+# Require a valid cosign signature for this repo. The ostree-image-signed
+# transport refuses to run when the policy default is a lone
+# `insecureAcceptAnything` (ostree-rs-ext container_policy_is_default_insecure),
+# so the default must be `reject`; per-transport "" catch-alls keep every other
+# image pull working exactly as before.
+cat > /etc/containers/policy.json <<EOF
+{
+    "default": [{"type": "reject"}],
+    "transports": {
+        "docker": {
+            "${IMAGE_REPO}": [
+                {
+                    "type": "sigstoreSigned",
+                    "keyPath": "/etc/pki/containers/sericea-main.pub",
+                    "signedIdentity": {"type": "matchRepository"}
+                }
+            ],
+            "": [{"type": "insecureAcceptAnything"}]
+        },
+        "docker-daemon": {"": [{"type": "insecureAcceptAnything"}]},
+        "containers-storage": {"": [{"type": "insecureAcceptAnything"}]},
+        "dir": {"": [{"type": "insecureAcceptAnything"}]},
+        "oci": {"": [{"type": "insecureAcceptAnything"}]},
+        "oci-archive": {"": [{"type": "insecureAcceptAnything"}]},
+        "docker-archive": {"": [{"type": "insecureAcceptAnything"}]},
+        "tarball": {"": [{"type": "insecureAcceptAnything"}]}
+    }
+}
+EOF
 
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo

@@ -130,8 +130,14 @@ jobs:
       - name: Sign container image
         if: github.event_name != 'pull_request'
         run: |
-          cosign sign -y --key env://COSIGN_PRIVATE_KEY ${{ steps.registry_case.outputs.lowercase }}/${{ steps.build_image.outputs.image }}@${TAGS}
+          set -euo pipefail
+          IMAGE="${{ steps.registry_case.outputs.lowercase }}/${{ steps.build_image.outputs.image }}"
+          # Sign by a tag reference and let cosign resolve it to the digest the
+          # registry actually serves. Passing ${{ steps.push.outputs.digest }}
+          # here put signatures on a digest consumers never pull, so verified
+          # pulls failed with "no signature exists".
+          read -r TAG _ <<< "${{ steps.build_image.outputs.tags }}"
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY "${IMAGE}:${TAG}"
         env:
-          TAGS: ${{ steps.push.outputs.digest }}
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
