@@ -19,6 +19,10 @@ FROM ${SOURCE_REGISTRY}/${SOURCE_IMAGE}:${SOURCE_TAG}
 
 COPY build.sh /tmp/build.sh
 
+# Cosign public key used to verify this image's signatures (see build.sh, which
+# wires up the registries.d + policy.json entries that consume it).
+COPY cosign.pub /etc/pki/containers/sericea-main.pub
+
 RUN mkdir -p /var/lib/alternatives && \
     /tmp/build.sh && \
     ostree container commit

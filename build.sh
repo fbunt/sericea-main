@@ -122,4 +122,27 @@ rpm-ostree install \
     qemu-kvm \
     virt-manager
 
+### Container signature verification
+# Trust this image's cosign signature (key copied in by the Containerfile) so
+# it can be pulled/rebased with the verified ostree-image-signed transport.
+IMAGE_REPO="ghcr.io/fbunt/sericea-main"
+
+# Tell containers/image the signatures live as sigstore attachments on the repo.
+cat > /etc/containers/registries.d/sericea-main.yaml <<EOF
+docker:
+  ${IMAGE_REPO}:
+    use-sigstore-attachments: true
+EOF
+
+# Require a valid cosign signature for this repo; everything else keeps the
+# base image's default policy.
+jq --arg repo "${IMAGE_REPO}" \
+   '.transports.docker[$repo] = [{
+       "type": "sigstoreSigned",
+       "keyPath": "/etc/pki/containers/sericea-main.pub",
+       "signedIdentity": {"type": "matchRepository"}
+   }]' \
+   /etc/containers/policy.json > /tmp/policy.json
+mv /tmp/policy.json /etc/containers/policy.json
+
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
