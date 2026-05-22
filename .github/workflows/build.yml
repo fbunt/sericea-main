@@ -126,6 +126,14 @@ jobs:
       # Sign container
       - uses: sigstore/cosign-installer@v4.1.1
         if: github.event_name != 'pull_request'
+        with:
+          # Pin to cosign v2.x. cosign v3 (the installer's current default)
+          # writes signatures as OCI 1.1 referrers in the new sigstore-bundle
+          # format, which Fedora's containers/image (use-sigstore-attachments,
+          # used by rpm-ostree/skopeo) cannot read — verified pulls fail with
+          # "A signature was required, but no signature exists". v2.x writes the
+          # legacy sha256-<digest>.sig tag attachment that the verifier expects.
+          cosign-release: 'v2.4.1'
 
       - name: Sign container image
         if: github.event_name != 'pull_request'
