@@ -8,10 +8,11 @@ This is a custom OCI image based on Fedora's `sway-atomic` image (`quay.io/fedor
 
 ## Architecture
 
-There are only two files that define the image:
+Three files define the image:
 
 - **`Containerfile`** — Declares build args (`SOURCE_REGISTRY`, `SOURCE_IMAGE`, `SOURCE_TAG`) and the `FROM` line, then copies and runs `build.sh`. Every `RUN` block must end with `ostree container commit`.
-- **`build.sh`** — The customization script. Enables RPMfusion, installs the ublue-style overlay packages, installs the project-specific extras, wires up cosign signature verification, and adds the Flathub Flatpak remote.
+- **`build.sh`** — The customization script. Enables RPMfusion, installs the ublue-style overlay packages, installs the project-specific extras, wires up cosign signature verification, adds the Flathub Flatpak remote, and finally runs `check-build.sh`.
+- **`check-build.sh`** — Build-time smoke test (modeled on ublue-os/main). Asserts critical packages are present (`rpm -q`), `policy.json` is valid with a `reject` default, and `bootc container lint` passes. Runs at the end of `build.sh` so a broken image fails the build before it is pushed or signed — this is what catches Fedora package renames across major-version bumps.
 
 The Containerfile also copies `cosign.pub` to `/etc/pki/containers/sericea-main.pub`; `build.sh` writes a `registries.d` entry and a scoped `sigstoreSigned` rule into `policy.json` so the image can be rebased with the verified `ostree-image-signed` transport.
 

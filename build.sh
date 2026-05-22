@@ -76,7 +76,7 @@ rpm-ostree install \
     libratbag-ratbagd \
     libva-utils \
     lshw \
-    mesa-libxatracker \
+    mesa-compat-libxatracker \
     net-tools \
     nvme-cli \
     nvtop \
@@ -165,3 +165,7 @@ cat > /etc/containers/policy.json <<EOF
 EOF
 
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+
+### Build-time smoke test (fails the build if the image is broken)
+/tmp/check-build.sh

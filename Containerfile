@@ -18,6 +18,7 @@ FROM ${SOURCE_REGISTRY}/${SOURCE_IMAGE}:${SOURCE_TAG}
 ## the following RUN directive does all the things required to run "build.sh" as recommended.
 
 COPY build.sh /tmp/build.sh
+COPY check-build.sh /tmp/check-build.sh
 
 # Cosign public key used to verify this image's signatures (see build.sh, which
 # wires up the registries.d + policy.json entries that consume it).
