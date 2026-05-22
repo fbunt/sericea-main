@@ -12,21 +12,15 @@ rpm-ostree install \
 
 
 ### Swap Fedora's patent-stripped media stack for RPMfusion's full versions
-# Fedora ships "-free" variants of ffmpeg, gstreamer, mesa va/vulkan, fdk-aac,
-# and libheif that omit patent-encumbered codecs (H.264/HEVC encode, AAC,
-# AC-3, MP3 encode, etc). Replace them with the RPMfusion equivalents.
-rpm-ostree override remove \
-    ffmpeg-free \
-    libavcodec-free \
-    libavdevice-free \
-    libavfilter-free \
-    libavformat-free \
-    libavutil-free \
-    libpostproc-free \
-    libswresample-free \
-    libswscale-free \
-    mesa-va-drivers \
-    mesa-vulkan-drivers \
+# Fedora ships "-free" ffmpeg/mesa packages that omit patent-encumbered codecs
+# (H.264/HEVC encode, AAC, AC-3, MP3 encode, etc) and conflict with the
+# RPMfusion equivalents. The exact set shifts every Fedora release (F43 renamed
+# mesa-libxatracker; F44 dropped libpostproc-free and mesa-va-drivers), so
+# discover whatever stripped packages are actually installed and remove those,
+# then pull in the full RPMfusion versions. Dynamic so future bumps don't break.
+mapfile -t STRIPPED < <(rpm -qa --queryformat '%{NAME}\n' \
+    | grep -E '^(ffmpeg-free|libav[a-z]+-free|libsw[a-z]+-free|libpostproc-free|mesa-va-drivers|mesa-vulkan-drivers)$' || true)
+rpm-ostree override remove "${STRIPPED[@]}" \
     --install=ffmpeg \
     --install=ffmpeg-libs \
     --install=libavcodec-freeworld \
