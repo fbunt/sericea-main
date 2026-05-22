@@ -16,7 +16,11 @@ Three files define the image:
 
 The Containerfile also copies `cosign.pub` to `/etc/pki/containers/sericea-main.pub`; `build.sh` writes a `registries.d` entry and a scoped `sigstoreSigned` rule into `policy.json` so the image can be rebased with the verified `ostree-image-signed` transport.
 
-The CI workflow (`.github/workflows/build.yml`) builds with `buildah`, pushes to `ghcr.io/<owner>/sericea-main`, and signs the image with `cosign` using `SIGNING_SECRET` (only on non-PR builds).
+## CI workflows
+
+- **`build.yml`** — builds with `buildah`, rechunks (`hhd-dev/rechunk`) for smaller upgrade deltas, pushes to `ghcr.io/<owner>/sericea-main`, and signs with `cosign` using `SIGNING_SECRET` (only on non-PR builds). A `check` job gates the build: non-`schedule` events always build, but the daily cron only rebuilds when Fedora's base digest differs from the `dev.sericea.base-digest` label recorded on the last `:latest` (base ref is read from the `Containerfile`). Rechunk strips labels, so labels — including `dev.sericea.base-digest` — are re-applied via its `labels` input.
+- **`lint.yml`** — `shellcheck` on `build.sh`/`check-build.sh` and `yamllint` on `.github/` (config in `.yamllint`). Runs on push/PR.
+- **`build-iso.yml`** — manual (`workflow_dispatch`); builds an Anaconda installer ISO from the published image via `bootc-image-builder` and uploads it as a workflow artifact. ISO user config lives in `iso/config.toml` (replace the placeholder credential before relying on it).
 
 ## Local Build
 

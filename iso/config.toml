@@ -1,0 +1,13 @@
+# bootc-image-builder customization for the installer ISO (build-iso.yml).
+# The image ships no user, so define one here or the installed system has no login.
+#
+# IMPORTANT: this file is committed to a public repo. Do NOT put a real password
+# here — replace the placeholder below with your SSH public key (preferred) and/or
+# change the password before relying on the ISO.
+
+[[customizations.user]]
+name = "fred"
+# Replace with your own key:
+#   key = "ssh-ed25519 AAAA... you@host"
+password = "changeme"
+groups = ["wheel"]
