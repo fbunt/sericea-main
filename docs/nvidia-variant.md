@@ -1,7 +1,8 @@
 # NVIDIA variant — plan & migration
 
-Status: **planned, not yet implemented.** This captures the design so the work can
-continue on the workstation (which has the actual GPU and is the migration target).
+Status: **Part A built and verified locally on F44** (branch `nvidia-variant`, two
+commits, not yet pushed). What remains: verify GPU + sway on the actual 1070, then
+build/sign the stepping-stone images and migrate the workstation (Part B).
 
 ## Why
 
@@ -12,119 +13,146 @@ support, eventually at Fedora 44.
 
 The laptop has already completed the journey (ublue F42 → this repo's image → F43 → F44,
 on the signed `ostree-image-signed` transport). The workstation is one major further
-back **and** needs the NVIDIA driver, which this repo does not yet build.
+back **and** needs the NVIDIA driver, which the base image does not build.
 
-## Decisions (locked)
+## Decisions
 
-- **GPU:** GTX 1070 = **Pascal** → must use the **proprietary `akmod-nvidia`** (the
-  open kernel modules require Turing or newer; they do *not* support Pascal).
-- **CUDA:** included (`xorg-x11-drv-nvidia-cuda`). Pascal (sm_61) is fine with the
-  current driver/CUDA libs.
+- **GPU:** GTX 1070 = **Pascal** → **`akmod-nvidia-580xx`** (RPMfusion's 580 *legacy*
+  branch). NVIDIA's 580 series is the last to support Maxwell/Pascal/Volta. RPMfusion's
+  mainline `akmod-nvidia` is now **595**, which dropped all pre-Turing GPUs — so mainline
+  (and `akmod-nvidia-open`, which needs Turing+ anyway) will **not** drive a 1070. This
+  reverses the original "use mainline akmod-nvidia" plan; see Pascal note below.
+- **CUDA:** included. The package carries the branch infix:
+  `xorg-x11-drv-nvidia-580xx-cuda` (mainline/open use `xorg-x11-drv-nvidia-cuda`).
+- **VAAPI:** `libva-nvidia-driver` (NOT `nvidia-vaapi-driver` — the project/package was
+  renamed). Branch-independent.
 - **Delivery:** a **separate image**, `ghcr.io/fbunt/sericea-main-nvidia`, not a tag on
   the base image.
-- **Future-proofing:** the driver is a **build arg** so an `-open` variant (for a future
-  Turing+/Blackwell GPU) is a one-line CI matrix addition later. We do *not* build
-  `-open` now — proprietary covers Pascal→Ada, which spans any realistic next card.
+- **Driver branch is a build arg** (`NVIDIA_DRIVER`, the `akmod-<value>` suffix), with
+  branch-aware CUDA naming, so a future Turing+/Blackwell card is a one-line swap to
+  `nvidia` or `nvidia-open`. A single image can only carry one branch (they provide the
+  same `nvidia.ko`); "supporting both" means two parameterized images.
+- **Base now publishes a Fedora-major tag** (`sericea-main:44`) so the NVIDIA `FROM` and
+  the stepping-stone rebases can pin a version. Previously only `:latest`/`:YYYYMMDD`
+  existed.
 
-Note: a single image cannot contain both `akmod-nvidia` and `akmod-nvidia-open` — they
-provide the same `nvidia.ko` and conflict, and the module is baked at build time.
-"Supporting both" therefore means two parameterized images, not one.
+## Part A — the NVIDIA layer (built; files on `nvidia-variant`)
 
-## Part A — build the NVIDIA variant (do this first, on the workstation)
+Layered on the base image so it inherits the whole sway / RPMfusion / signing / lint
+setup and only adds GPU bits.
 
-Build NVIDIA as a layer on top of the existing base image so it inherits the entire
-sway / RPMfusion / signing / `check-build.sh` setup and only adds GPU bits.
+- **`Containerfile.nvidia`** — `FROM ghcr.io/fbunt/sericea-main:${SOURCE_TAG}`,
+  `ARG NVIDIA_DRIVER="nvidia-580xx"`. Runs `build-nvidia.sh` then `ostree container commit`.
+- **`build-nvidia.sh`** — installs + compiles the kmod at build time:
+  - Installs `akmod-${NVIDIA_DRIVER}`, the branch CUDA package, `libva-nvidia-driver`,
+    and `kernel-devel` **matching the baked kernel exactly** (`rpm -q kernel`).
+  - **The akmod-in-container gotcha (the finicky part, now solved):**
+    akmod-nvidia's ostree `%post` runs `akmods-ostree-post`, which builds the kmod by
+    calling `akmodsbuild` **as root**. `akmodsbuild`'s "don't misuse me as root" guard is
+    literally `if [[ -w /var ]]` — it assumes the rpm-ostree *compose* sandbox where
+    `/var` is read-only. In a `podman build` + `rpm-ostree install`, `/var` **is**
+    writable, so the guard trips, the `%post` returns non-zero, and the whole transaction
+    aborts (`Error -1 running transaction`). ublue avoids this by building on a *non-ostree*
+    base (the hook short-circuits) and running `akmods` manually. We do the equivalent on
+    our ostree base: install `akmods` first, replace `/usr/sbin/akmods-ostree-post` with
+    an `exit 0` stub, install the driver, then build the module ourselves as the
+    unprivileged `akmods` user (`runuser -u akmods -- akmodsbuild …`) and `rpm2cpio | cpio`
+    it into `/` — exactly what the compose hook would have done.
+  - nouveau blacklist (`/usr/lib/modprobe.d/blacklist-nouveau.conf`) + kargs
+    (`/usr/lib/bootc/kargs.d/00-nvidia.toml`: blacklist nouveau, `nvidia-drm.modeset=1`).
+  - sway/wlroots env drop-in (`/usr/lib/environment.d/90-nvidia-wayland.conf`,
+    currently just `WLR_NO_HARDWARE_CURSORS=1`) — **still to confirm on hardware**, incl.
+    whether sway needs `--unsupported-gpu`.
+  - Widens the inherited `policy.json` + `registries.d` to also trust
+    `ghcr.io/fbunt/sericea-main-nvidia` (same cosign key, already on disk).
+- **`check-build-nvidia.sh`** — asserts `nvidia.ko` was produced for the baked kernel,
+  the akmod + CUDA packages are installed, policy trusts both repos, `bootc container lint`.
+- **`build-nvidia.yml`** — runs after the base publishes, `FROM` the published base tag,
+  reuses rechunk + cosign signing, gated on the base digest changing; `workflow_dispatch`
+  inputs `fedora_version` (42/43/44) and `nvidia_driver` for the stepping stones.
 
-- **`Containerfile.nvidia`** — `FROM ghcr.io/fbunt/sericea-main:<tag>` (the base we
-  already build), with a build arg for the driver:
-  ```dockerfile
-  ARG SOURCE_REGISTRY="ghcr.io/fbunt"
-  ARG SOURCE_IMAGE="sericea-main"
-  ARG SOURCE_TAG="44"
-  ARG NVIDIA_DRIVER="nvidia"   # "nvidia" (proprietary) | "nvidia-open" (Turing+)
-  FROM ${SOURCE_REGISTRY}/${SOURCE_IMAGE}:${SOURCE_TAG}
-  COPY build-nvidia.sh /tmp/build-nvidia.sh
-  RUN /tmp/build-nvidia.sh && ostree container commit
-  ```
+Local verification (F44, kernel `7.0.9-205.fc44`): `akmod-nvidia-580xx 580.159.03` →
+`nvidia.ko` (vermagic matches the kernel), `check-build-nvidia` passes, policy trusts
+both repos. Build command:
+```bash
+podman build -f Containerfile.nvidia --build-arg SOURCE_TAG=latest -t local-sericea-main-nvidia .
+```
+(`SOURCE_TAG=latest` because `:44` only exists once the updated `build.yml` runs on `main`.)
 
-- **`build-nvidia.sh`** — installs and compiles the module at image-build time so
-  nothing builds at runtime (atomic image). Sketch:
-  - RPMfusion is already enabled in the base image, so the akmod packages resolve.
-  - Install `akmod-${NVIDIA_DRIVER}` + `xorg-x11-drv-nvidia-cuda` + `nvidia-vaapi-driver`
-    + `kernel-devel` matching the **base image's kernel**:
-    `rpm-ostree install kernel-devel-$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel) ...`
-  - Build the kmod for that exact kernel:
-    `akmods --force --kernels "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel)"`
-    (Confirm the akmods invocation/module name during the first local build — this is
-    the finicky part. Reference: Fedora bootc + NVIDIA examples; ublue did this in a
-    separate `akmods` image, but building in-layer works on a Fedora base.)
-  - Drop nouveau blacklist + modeset:
-    - `/usr/lib/modprobe.d/blacklist-nouveau.conf` → `blacklist nouveau`
-    - `/usr/lib/bootc/kargs.d/00-nvidia.toml` →
-      `kargs = ["rd.driver.blacklist=nouveau", "modprobe.blacklist=nouveau", "nvidia-drm.modeset=1"]`
-  - **sway-on-NVIDIA tweak:** wlroots needs `--unsupported-gpu` and usually
-    `WLR_NO_HARDWARE_CURSORS=1` / `WLR_RENDERER=vulkan` env. Add a drop-in (e.g. an env
-    file or a `/usr/share/sway` config snippet) — verify on the actual GPU.
-  - Run a check at the end (extend `check-build.sh` or a parallel `check-build-nvidia.sh`)
-    asserting the module is present:
-    `find /usr/lib/modules -name 'nvidia.ko*'` and `rpm -q akmod-${NVIDIA_DRIVER}`.
+## Part A.5 — verify GPU + sway on the actual 1070 first
 
-- **CI:** add a job that builds `sericea-main-nvidia` **after** the base image
-  publishes, `FROM` the just-pushed base, reusing the **same rechunk + cosign signing +
-  build-required** machinery. Easiest as a second matrix entry or a dependent job in
-  `build.yml`; publish to the `sericea-main-nvidia` package with the same tag scheme.
-  The cosign key/policy are identical (same repo owner) — the existing `policy.json`
-  scope should be widened to cover `ghcr.io/fbunt/sericea-main-nvidia` too.
+Before building the throwaway 42/43 images, confirm the GPU bits work on real hardware
+(GPU correctness is identical regardless of how you reach F44; this de-risks early). The
+F41 deployment is already pinned, so this is a throwaway test you roll back from.
+
+`podman build` here runs in the user's rootless storage, but `rpm-ostree` (root) reads
+*root's* storage — so move the image over first rather than rebuilding as root:
+```bash
+podman save localhost/local-sericea-main-nvidia:latest | sudo podman load
+sudo rpm-ostree rebase ostree-unverified-image:containers-storage:localhost/local-sericea-main-nvidia:latest
+systemctl reboot
+```
+After reboot, verify: `nvidia-smi` lists the 1070, `cat /proc/driver/nvidia/version`,
+`lsmod | grep nvidia`, and sway starts and renders (note whether `--unsupported-gpu` /
+which `WLR_*` are actually needed). Then roll back to pinned F41:
+```bash
+sudo rpm-ostree rollback && systemctl reboot
+```
+Fold any sway/WLR findings back into `build-nvidia.sh`.
 
 ## Part B — workstation migration (stepping stones)
 
-The first move is a **cross-base rebase** (off ublue) spanning 41→44 = three majors. A
-rebase is a full atomic image swap (rollback-able), so the NVIDIA driver isn't the
-cross-version risk — each target image is internally consistent. The risk is `/etc` +
-`/var` config drift across three Fedora versions, so step one major at a time and verify
-boot + GPU at each stop.
+Chosen path: step one major at a time (41→42→43→44), verifying boot + GPU + sway at each
+stop, because the first hop is a cross-vendor change (ublue → ours) and three majors of
+`/etc` drift is the real risk (a rebase is a rollback-able atomic swap, so the driver
+isn't the cross-version risk). Reality the original plan missed: the repo only ever built
+the *current* Fedora, so **the 42/43 base images don't exist** and must be built too.
 
-Build the NVIDIA variant at **42, 43, 44** (the 42/43 images are transient, only for the
-hops), then:
-
+1. Build + sign the base and NVIDIA images at **42, 43, 44**:
+   - Base 42/43 via `build.yml` → Run workflow → `source_tag=42` (then `43`). 44 is the
+     normal `main` build (now also tagged `:44`).
+   - NVIDIA 42/43/44 via `build-nvidia.yml` → Run workflow → `fedora_version=42` (then
+     `43`, `44`). Needs the matching base tag to exist first.
+   - The 42/43 builds may need per-version fixups (e.g. an F42-only package rename) —
+     `check-build` will surface them, same as base bumps do.
+2. Rebase, verifying GPU + sway after each reboot:
 ```bash
-# on the workstation, pin the current known-good F41 deployment first:
-sudo ostree admin pin 0
+sudo ostree admin pin 0   # F41 is already pinned per rpm-ostree status; confirm
 
-# 1 major at a time, verify GPU + sway after each reboot:
-sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/fbunt/sericea-main-nvidia:42   # 41 -> 42
+# 41 -> 42: UNVERIFIED, because the running ublue F41 deployment has ublue's policy,
+# not ours, and ostree-image-signed reads the policy from the *running* deployment.
+sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/fbunt/sericea-main-nvidia:42
 systemctl reboot
-# (then switch to the signed transport once on an image that carries the policy+key,
-#  same as the laptop did — see below)
+
+# now booted on an image carrying our policy.json (default reject) + cosign key, so
+# switch to the signed transport for the rest (matches the laptop's journey).
 sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/fbunt/sericea-main-nvidia:43
 systemctl reboot
 sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/fbunt/sericea-main-nvidia:44
 systemctl reboot
+
+sudo ostree admin pin 0   # pin the good F44; unpin F41 later once confident
 ```
+Signing chain is already fixed in this repo (cosign v2 legacy attachments, key matches
+`SIGNING_SECRET`). The `nvidia-580xx` branch must also exist in RPMfusion for F42/F43
+(it does for F44; confirm when building those).
 
-Signing/transport caveat (learned on the laptop): `ostree-image-signed` reads the policy
-from the *currently running* deployment and refuses a policy whose default is
-`insecureAcceptAnything`. The ublue F41 base will not have this repo's policy, so the
-**first hop uses `ostree-unverified-registry`**; once booted on an image that carries the
-corrected `policy.json` (default `reject`) + the cosign pub key, switch to
-`ostree-image-signed` for the rest. The signing chain itself is already fixed in this
-repo (cosign v2 legacy attachments, rotated key matching `SIGNING_SECRET`).
+## Open questions / risks
 
-## Open questions / risks to resolve during implementation
-
-1. **Pascal longevity:** confirm the current RPMfusion `akmod-nvidia` branch still
-   supports Pascal (it does today; NVIDIA is moving older gens toward legacy). If a
-   future bump drops it, fall back to the legacy akmod (`nvidia-470xx`-style) — the
-   build/`check-build` will surface this.
-2. **akmod-at-build-time:** the exact `akmods` invocation and `kernel-devel` matching is
-   the main thing to nail on the first local build (on the workstation).
-3. **sway + NVIDIA:** confirm the `--unsupported-gpu` / `WLR_*` settings needed for the
-   1070 on Wayland.
+1. ~~Pascal longevity~~ **Resolved:** mainline already dropped Pascal; we use the
+   `nvidia-580xx` legacy branch. 580 is a legacy branch (~3 yr support window); if it is
+   ever dropped, the next fallback is `nvidia-470xx` (Kepler) — but that's older than
+   Pascal, so realistically 580xx is the floor for the 1070. `check-build` will surface a
+   future break.
+2. ~~akmod-at-build-time~~ **Resolved:** see the akmod-in-container gotcha above.
+3. **sway + NVIDIA (open):** confirm `--unsupported-gpu` / `WLR_*` needed for the 1070 on
+   Wayland — do this in Part A.5 on the real GPU.
 
 ## Repo state at time of writing
 
-- `main` = Fedora 44, working cosign signing, `check-build.sh` + `bootc container lint`.
-- Branch **`ci-improvements`** (open, pushed) adds: lint workflow, build-required gate,
-  rechunk, and a manual installer-ISO workflow — open a PR to `main` to validate the
-  rechunk build, then merge. The NVIDIA work should build on top of that (it reuses the
-  rechunk/sign/gate machinery).
+- `main` = Fedora 44; `ci-improvements` is **merged** (rechunk + build-required gate +
+  lint + ISO workflows are live), plus the mesa-freeworld swap was dropped (it broke the
+  F44 depsolve; do **not** reintroduce `mesa-*-freeworld` — see CLAUDE.md Key Constraints).
+- Branch **`nvidia-variant`** (unpushed): `ci: version-tag the base image …` +
+  `feat: add NVIDIA variant (proprietary 580xx akmod …)`. Open a PR / merge to trigger the
+  base `:44` build, then run `build-nvidia.yml` for the stepping stones.
