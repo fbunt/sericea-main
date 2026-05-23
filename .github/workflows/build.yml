@@ -13,6 +13,14 @@ on:
     paths-ignore:
       - '**/README.md'
   workflow_dispatch:
+    inputs:
+      source_tag:
+        description: >-
+          Fedora base tag to build, overriding the Containerfile's SOURCE_TAG.
+          Use for transient stepping-stone images (e.g. 42 or 43); leave blank
+          to build the repo's current Fedora version.
+        required: false
+        default: ''
 
 env:
   MY_IMAGE_NAME: "${{ github.event.repository.name }}"  # the name of the image produced by this build, matches repo names
@@ -79,19 +87,46 @@ jobs:
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@v9
 
+      # Effective Fedora base tag: the workflow_dispatch override if given, else
+      # the Containerfile's SOURCE_TAG (single source of truth). A "transient"
+      # build is a manual override to a Fedora version other than the repo's
+      # current one — i.e. a stepping-stone image that must not move :latest.
+      - name: Resolve source tag
+        id: src
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ github.event.inputs.source_tag }}"
+          DEFAULT=$(grep -oP '^ARG SOURCE_TAG="\K[^"]+' Containerfile)
+          TAG="${INPUT:-$DEFAULT}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if [ -n "${INPUT}" ] && [ "${INPUT}" != "${DEFAULT}" ]; then
+            echo "transient=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "transient=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Building base tag ${TAG} (transient=${INPUT:+true})"
+
       - name: Generate tags
         id: generate-tags
         shell: bash
         run: |
           TIMESTAMP="$(date +%Y%m%d)"
           SHA_SHORT="${GITHUB_SHA::7}"
+          VERSION="${{ steps.src.outputs.tag }}"
           # Sanitize branch name for use as an image tag (/ -> -).
           BRANCH="${GITHUB_REF_NAME//\//-}"
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
               alias_tags=("pr-${{ github.event.number }}" "${SHA_SHORT}")
+          elif [[ "${{ steps.src.outputs.transient }}" == "true" ]]; then
+              # Stepping-stone build for an older Fedora: tag by version only so
+              # it can't clobber main's :latest / current bare timestamp.
+              alias_tags=("${VERSION}" "${VERSION}-${TIMESTAMP}")
           elif [[ "${BRANCH}" == "main" ]]; then
-              alias_tags=("${TIMESTAMP}" "latest")
+              # Publish the Fedora-major tag (e.g. :44) alongside latest/timestamp
+              # so version-pinned references (the nvidia layer, rebases) resolve.
+              alias_tags=("${TIMESTAMP}" "latest" "${VERSION}")
           else
               # Non-main branch push: keep tags branch-scoped so they can't
               # clobber main's :latest / bare timestamp.
@@ -126,7 +161,7 @@ jobs:
           set -euo pipefail
           REG=$(grep -oP '^ARG SOURCE_REGISTRY="\K[^"]+' Containerfile)
           IMG=$(grep -oP '^ARG SOURCE_IMAGE="\K[^"]+' Containerfile)
-          TAG=$(grep -oP '^ARG SOURCE_TAG="\K[^"]+' Containerfile)
+          TAG="${{ steps.src.outputs.tag }}"
           DIGEST=$(podman run --rm quay.io/skopeo/stable inspect \
             --format '{{.Digest}}' "docker://${REG}/${IMG}:${TAG}")
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
@@ -142,6 +177,8 @@ jobs:
           # Postfix image name with -custom to make it a little more descriptive
           # Syntax: https://docs.github.com/en/actions/learn-github-actions/expressions#format
           image: ${{ env.MY_IMAGE_NAME }}
+          build-args: |
+            SOURCE_TAG=${{ steps.src.outputs.tag }}
           tags: |
             ${{ steps.generate-tags.outputs.alias_tags }}
           labels: |
