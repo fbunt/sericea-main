@@ -111,13 +111,26 @@ EOF
 
 
 ### sway / wlroots on NVIDIA
-# wlroots historically needs software cursors on the proprietary driver, and
-# sway must be launched with --unsupported-gpu when wlroots flags the GPU. These
-# are set globally so the session inherits them. VERIFY ON THE ACTUAL 1070:
-# recent wlroots + driver 550+ may not need all of this; trim once confirmed.
+# sway refuses to start on the proprietary driver unless launched with
+# --unsupported-gpu (sway/server.c: "Proprietary drivers are NOT supported").
+# It is a CLI flag, not an env var. Fedora's start-sway wrapper appends
+# $SWAY_EXTRA_ARGS to the sway command, reading it from /etc/sway/environment;
+# the SDDM greeter (sddm-compositor-sway) sources start-sway too, so this one
+# file covers BOTH the login greeter and the user session. Confirmed required on
+# the GTX 1070 (driver 580) — without it the greeter's sway dies and you land on
+# a TTY. (Caveat: /etc is 3-way merged on rebase; if a machine already has its
+# own /etc/sway/environment without this line, add it there.)
+mkdir -p /etc/sway
+cat >> /etc/sway/environment <<'EOF'
+
+# sericea-main-nvidia: proprietary NVIDIA driver needs --unsupported-gpu.
+SWAY_EXTRA_ARGS=--unsupported-gpu
+EOF
+
+# Software cursors avoid the classic NVIDIA cursor corruption on wlroots.
+# start-sway evals environment.d, so this is picked up for greeter + session.
 mkdir -p /usr/lib/environment.d
 cat > /usr/lib/environment.d/90-nvidia-wayland.conf <<'EOF'
-# NVIDIA proprietary driver on wlroots/sway. Re-verify on hardware.
 WLR_NO_HARDWARE_CURSORS=1
 EOF
 

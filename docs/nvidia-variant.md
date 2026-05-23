@@ -60,9 +60,11 @@ setup and only adds GPU bits.
     it into `/` — exactly what the compose hook would have done.
   - nouveau blacklist (`/usr/lib/modprobe.d/blacklist-nouveau.conf`) + kargs
     (`/usr/lib/bootc/kargs.d/00-nvidia.toml`: blacklist nouveau, `nvidia-drm.modeset=1`).
-  - sway/wlroots env drop-in (`/usr/lib/environment.d/90-nvidia-wayland.conf`,
-    currently just `WLR_NO_HARDWARE_CURSORS=1`) — **still to confirm on hardware**, incl.
-    whether sway needs `--unsupported-gpu`.
+  - sway launch: sets `SWAY_EXTRA_ARGS=--unsupported-gpu` in `/etc/sway/environment`
+    (sway refuses the proprietary driver without it) + `WLR_NO_HARDWARE_CURSORS=1` via
+    environment.d. Both the SDDM greeter (`sddm-compositor-sway`) and the user session
+    (`sway.desktop`→`start-sway`) funnel through `start-sway`, which appends
+    `$SWAY_EXTRA_ARGS` — so the one file covers both. **Confirmed on the 1070.**
   - Widens the inherited `policy.json` + `registries.d` to also trust
     `ghcr.io/fbunt/sericea-main-nvidia` (same cosign key, already on disk).
 - **`check-build-nvidia.sh`** — asserts `nvidia.ko` was produced for the baked kernel,
@@ -145,8 +147,12 @@ Signing chain is already fixed in this repo (cosign v2 legacy attachments, key m
    Pascal, so realistically 580xx is the floor for the 1070. `check-build` will surface a
    future break.
 2. ~~akmod-at-build-time~~ **Resolved:** see the akmod-in-container gotcha above.
-3. **sway + NVIDIA (open):** confirm `--unsupported-gpu` / `WLR_*` needed for the 1070 on
-   Wayland — do this in Part A.5 on the real GPU.
+3. ~~sway + NVIDIA~~ **Resolved on the 1070:** the driver loads perfectly (nvidia-smi
+   sees the GTX 1070, modeset karg applied), but sway aborts on the proprietary driver
+   without `--unsupported-gpu`, taking the SDDM-on-sway greeter down with it (you land on
+   a TTY). Fixed via `SWAY_EXTRA_ARGS=--unsupported-gpu` in `/etc/sway/environment`
+   (see Part A). Remaining hardware check: confirm sway actually *renders* fine once it
+   launches with the flag (very likely — the GPU is fully up).
 
 ## Repo state at time of writing
 
