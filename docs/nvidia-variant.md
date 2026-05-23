@@ -117,14 +117,27 @@ the *current* Fedora, so **the 42/43 base images don't exist** and must be built
      `43`, `44`). Needs the matching base tag to exist first.
    - The 42/43 builds may need per-version fixups (e.g. an F42-only package rename) —
      `check-build` will surface them, same as base bumps do.
+   Ordering matters: `sericea-main:<ver>` must be published **before** the NVIDIA
+   `fedora_version=<ver>` build (its `FROM` and `check` job both need it). build-nvidia.yml
+   is dispatch/schedule only (no push trigger) for exactly this reason.
 2. Rebase, verifying GPU + sway after each reboot:
 ```bash
 sudo ostree admin pin 0   # F41 is already pinned per rpm-ostree status; confirm
+
+# Drop the ublue F41 layered packages FIRST. Otherwise the rebase tries to
+# re-depsolve them against the new image's F44 repos and fails:
+#   "Failed to download gpg key ... RPM-GPG-KEY-fedora-44-x86_64" (that key isn't
+#   on the running F41 system). Our image already bakes in docker-cli/neovim/etc;
+#   re-layer the few extras not in build.sh (moby-engine, docker-buildx,
+#   podman-compose) once on F44 if you want them — or add them to build.sh.
+sudo rpm-ostree reset
 
 # 41 -> 42: UNVERIFIED, because the running ublue F41 deployment has ublue's policy,
 # not ours, and ostree-image-signed reads the policy from the *running* deployment.
 sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/fbunt/sericea-main-nvidia:42
 systemctl reboot
+# Before rebooting, confirm `rpm-ostree status` shows no LayeredPackages on the
+# new deployment (the reset took); see Part A.5 for the same check.
 
 # now booted on an image carrying our policy.json (default reject) + cosign key, so
 # switch to the signed transport for the rest (matches the laptop's journey).
