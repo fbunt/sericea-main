@@ -11,21 +11,27 @@ rpm-ostree install \
     "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm"
 
 
-### Swap Fedora's patent-stripped media stack for RPMfusion's full versions
-# Fedora ships "-free" ffmpeg/mesa packages that omit patent-encumbered codecs
-# (H.264/HEVC encode, AAC, AC-3, MP3 encode, etc) and conflict with the
-# RPMfusion equivalents. The exact set shifts every Fedora release (F43 renamed
-# mesa-libxatracker; F44 dropped libpostproc-free and mesa-va-drivers), so
-# discover whatever stripped packages are actually installed and remove those,
-# then pull in the full RPMfusion versions. Dynamic so future bumps don't break.
+### Swap Fedora's patent-stripped ffmpeg stack for RPMfusion's full versions
+# Fedora ships "-free" ffmpeg packages that omit patent-encumbered codecs
+# (H.264/HEVC encode, AAC, AC-3, MP3 encode, etc). Replace them with RPMfusion's
+# full ffmpeg. The exact set shifts every Fedora release (F43 renamed
+# mesa-libxatracker; F44 dropped libpostproc-free), so discover whatever stripped
+# ffmpeg packages are actually installed, remove those, and pull in the full
+# RPMfusion versions. Dynamic so future bumps don't break.
+#
+# NOTE: deliberately NOT swapping mesa to RPMfusion's mesa-*-freeworld drivers.
+# Those addon subpackages exact-version-pin Fedora's mesa-filesystem, so whenever
+# the base image's mesa drifts from RPMfusion's freeworld build (frequent: mesa
+# moves fast, RPMfusion lags then leaps past it) the depsolve hard-fails the whole
+# build. Fedora's stock mesa-va-drivers/mesa-vulkan-drivers have shipped the hw
+# video codecs since F40, so the freeworld swap buys little; ublue-os/main dropped
+# it for the same reason. See CLAUDE.md "Key Constraints".
 mapfile -t STRIPPED < <(rpm -qa --queryformat '%{NAME}\n' \
-    | grep -E '^(ffmpeg-free|libav[a-z]+-free|libsw[a-z]+-free|libpostproc-free|mesa-va-drivers|mesa-vulkan-drivers)$' || true)
+    | grep -E '^(ffmpeg-free|libav[a-z]+-free|libsw[a-z]+-free|libpostproc-free)$' || true)
 rpm-ostree override remove "${STRIPPED[@]}" \
     --install=ffmpeg \
     --install=ffmpeg-libs \
-    --install=libavcodec-freeworld \
-    --install=mesa-va-drivers-freeworld \
-    --install=mesa-vulkan-drivers-freeworld
+    --install=libavcodec-freeworld
 
 
 ### Additive RPMfusion codec packages

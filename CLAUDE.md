@@ -43,5 +43,6 @@ podman build -f Containerfile \
 - Every `RUN` layer in the `Containerfile` must end with `ostree container commit` (rpm-ostree container requirement).
 - `/var/lib/alternatives` must be created before running `build.sh` to prevent RPM install failures.
 - RPMfusion (free + nonfree) is enabled in `build.sh`, so package additions can rely on it.
+- Do **not** swap mesa to RPMfusion's `mesa-*-freeworld` drivers. They exact-version-pin Fedora's `mesa-filesystem`, so any drift between the base image's mesa and RPMfusion's freeworld build (frequent) hard-fails the depsolve and breaks the build. Fedora's stock `mesa-va-drivers`/`mesa-vulkan-drivers` ship the hardware video codecs since F40, so the swap is unnecessary; `build.sh` intentionally swaps only the ffmpeg stack. (ublue-os/main dropped freeworld mesa for the same reason, sourcing the full mesa stack from a single repo instead.)
 - Never commit `cosign.key` — only `cosign.pub` belongs in the repo.
 - The `SIGNING_SECRET` GitHub Actions secret must hold the unencrypted `cosign.key` contents.
