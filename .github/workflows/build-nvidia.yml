@@ -1,7 +1,7 @@
 ---
 name: build-nvidia
 # Builds the NVIDIA variant as a layer on top of the already-published base
-# sericea-main image. Reuses the base's rechunk + cosign-signing machinery.
+# sericea-main image. Reuses the base's cosign-signing machinery.
 #
 # No push trigger on purpose: this layer FROMs ghcr.io/<owner>/sericea-main:<ver>,
 # which only exists once build.yml has published it. Triggering on a main push
@@ -127,7 +127,6 @@ jobs:
           echo "Generated the following tags:"
           printf '  %s\n' "${alias_tags[@]}"
           echo "alias_tags=${alias_tags[*]}" >> "$GITHUB_OUTPUT"
-          echo "primary=${alias_tags[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Image Metadata
         uses: docker/metadata-action@v6
@@ -176,31 +175,6 @@ jobs:
             ${{ steps.meta.outputs.labels }}
             dev.sericea.base-digest=${{ steps.basedigest.outputs.digest }}
           oci: false
-
-      # Rechunk re-slices the image into stable, evenly-sized layers so
-      # rpm-ostree upgrades pull much smaller deltas. It strips labels, so they
-      # are re-applied here and the result re-tagged for the existing push step.
-      - name: Run Rechunker
-        id: rechunk
-        uses: hhd-dev/rechunk@v1.2.4
-        with:
-          rechunk: ghcr.io/hhd-dev/rechunk:v1.2.4
-          ref: localhost/${{ env.MY_IMAGE_NAME }}:${{ steps.generate-tags.outputs.primary }}
-          prev-ref: ${{ steps.registry_case.outputs.lowercase }}/${{ env.MY_IMAGE_NAME }}:latest
-          version: ${{ steps.src.outputs.version }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            dev.sericea.base-digest=${{ steps.basedigest.outputs.digest }}
-
-      - name: Load rechunked image and re-tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMAGE=$(podman pull ${{ steps.rechunk.outputs.ref }})
-          sudo rm -rf "${{ steps.rechunk.outputs.location }}"
-          for tag in ${{ steps.generate-tags.outputs.alias_tags }}; do
-            podman tag "$IMAGE" "localhost/${MY_IMAGE_NAME}:${tag}"
-          done
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4

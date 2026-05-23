@@ -136,8 +136,6 @@ jobs:
           echo "Generated the following tags:"
           printf '  %s\n' "${alias_tags[@]}"
           echo "alias_tags=${alias_tags[*]}" >> $GITHUB_OUTPUT
-          # Primary (first) tag — used as the rechunk source ref.
-          echo "primary=${alias_tags[0]}" >> $GITHUB_OUTPUT
 
       # Build metadata
       - name: Image Metadata
@@ -165,7 +163,6 @@ jobs:
           DIGEST=$(podman run --rm quay.io/skopeo/stable inspect \
             --format '{{.Digest}}' "docker://${REG}/${IMG}:${TAG}")
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          echo "fedora=${TAG}" >> "$GITHUB_OUTPUT"
 
       # Build image using Buildah action
       - name: Build Image
@@ -193,32 +190,6 @@ jobs:
         uses: ASzc/change-string-case-action@v8
         with:
           string: ${{ env.IMAGE_REGISTRY }}
-
-      # Rechunk re-slices the image into stable, evenly-sized layers so
-      # rpm-ostree upgrades pull much smaller deltas. It flattens the image and
-      # strips labels, so labels are re-applied here and the result is loaded
-      # back into podman storage and re-tagged for the existing push step.
-      - name: Run Rechunker
-        id: rechunk
-        uses: hhd-dev/rechunk@v1.2.4
-        with:
-          rechunk: ghcr.io/hhd-dev/rechunk:v1.2.4
-          ref: localhost/${{ env.MY_IMAGE_NAME }}:${{ steps.generate-tags.outputs.primary }}
-          prev-ref: ${{ steps.registry_case.outputs.lowercase }}/${{ env.MY_IMAGE_NAME }}:latest
-          version: ${{ steps.basedigest.outputs.fedora }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            dev.sericea.base-digest=${{ steps.basedigest.outputs.digest }}
-
-      - name: Load rechunked image and re-tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMAGE=$(podman pull ${{ steps.rechunk.outputs.ref }})
-          sudo rm -rf "${{ steps.rechunk.outputs.location }}"
-          for tag in ${{ steps.generate-tags.outputs.alias_tags }}; do
-            podman tag "$IMAGE" "localhost/${MY_IMAGE_NAME}:${tag}"
-          done
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
