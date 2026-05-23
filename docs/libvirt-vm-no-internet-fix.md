@@ -1,5 +1,10 @@
 # Libvirt VM has no internet (Fedora Atomic / ublue + Docker)
 
+> **Now baked into the image.** `build.sh` ships and enables
+> `libvirt-docker-forward.service` (the "Permanent fix" below), so a fresh
+> sericea-main install handles this automatically. This doc is kept as the
+> rationale + diagnostics for the rule, and for systems that predate the fix.
+
 ## Symptom
 
 A VM managed by virt-manager (libvirt default NAT network, `virbr0`) can reach
