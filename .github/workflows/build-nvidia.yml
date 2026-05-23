@@ -2,17 +2,15 @@
 name: build-nvidia
 # Builds the NVIDIA variant as a layer on top of the already-published base
 # sericea-main image. Reuses the base's rechunk + cosign-signing machinery.
+#
+# No push trigger on purpose: this layer FROMs ghcr.io/<owner>/sericea-main:<ver>,
+# which only exists once build.yml has published it. Triggering on a main push
+# would race the base build (and fail outright the first time, before :44 ever
+# exists). Instead it runs on the daily schedule (after the base build) and on
+# manual dispatch — which is also how the stepping-stone images (42/43) are built.
 on:
   schedule:
     - cron: '35 10 * * *'  # 30 min after the base build's 10:05 UTC run
-  push:
-    branches:
-      - main
-    paths:
-      - 'Containerfile.nvidia'
-      - 'build-nvidia.sh'
-      - 'check-build-nvidia.sh'
-      - '.github/workflows/build-nvidia.yml'
   workflow_dispatch:
     inputs:
       fedora_version:
