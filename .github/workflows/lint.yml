@@ -1,0 +1,20 @@
+---
+name: lint
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: shellcheck + yamllint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: shellcheck
+        run: shellcheck build.sh check-build.sh
+
+      - name: yamllint
+        run: pipx run yamllint .github/ .yamllint

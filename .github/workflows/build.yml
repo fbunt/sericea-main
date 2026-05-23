@@ -20,9 +20,51 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
 
 jobs:
+  check:
+    name: Check if build is required
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Decide whether to build
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the daily schedule is gated; pushes, PRs and manual runs always build.
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "Event ${{ github.event_name }} — building."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Base ref comes from the Containerfile so there is a single source of truth.
+          REG=$(grep -oP '^ARG SOURCE_REGISTRY="\K[^"]+' Containerfile)
+          IMG=$(grep -oP '^ARG SOURCE_IMAGE="\K[^"]+' Containerfile)
+          TAG=$(grep -oP '^ARG SOURCE_TAG="\K[^"]+' Containerfile)
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          CUR=$(podman run --rm quay.io/skopeo/stable inspect \
+            --format '{{.Digest}}' "docker://${REG}/${IMG}:${TAG}")
+          LAST=$(podman run --rm quay.io/skopeo/stable inspect \
+            --format '{{ index .Labels "dev.sericea.base-digest" }}' \
+            "docker://ghcr.io/${OWNER}/${MY_IMAGE_NAME}:latest" 2>/dev/null || echo "")
+          echo "base digest now:          ${CUR}"
+          echo "last built against:       ${LAST:-<none>}"
+          if [ "${CUR}" != "${LAST}" ]; then
+            echo "Base changed — building."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Base unchanged — skipping scheduled rebuild."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build_push:
     name: Build and push image
     runs-on: ubuntu-24.04
+    needs: check
+    if: needs.check.outputs.build == 'true'
 
     permissions:
       contents: read
@@ -59,6 +101,8 @@ jobs:
           echo "Generated the following tags:"
           printf '  %s\n' "${alias_tags[@]}"
           echo "alias_tags=${alias_tags[*]}" >> $GITHUB_OUTPUT
+          # Primary (first) tag — used as the rechunk source ref.
+          echo "primary=${alias_tags[0]}" >> $GITHUB_OUTPUT
 
       # Build metadata
       - name: Image Metadata
@@ -73,6 +117,21 @@ jobs:
             org.opencontainers.image.description=${{ env.MY_IMAGE_DESC }}
             org.opencontainers.image.title=${{ env.MY_IMAGE_NAME }}
 
+      # Record the base image digest so the next scheduled run can tell whether
+      # Fedora's base actually changed (see the "check" job).
+      - name: Resolve base image digest
+        id: basedigest
+        shell: bash
+        run: |
+          set -euo pipefail
+          REG=$(grep -oP '^ARG SOURCE_REGISTRY="\K[^"]+' Containerfile)
+          IMG=$(grep -oP '^ARG SOURCE_IMAGE="\K[^"]+' Containerfile)
+          TAG=$(grep -oP '^ARG SOURCE_TAG="\K[^"]+' Containerfile)
+          DIGEST=$(podman run --rm quay.io/skopeo/stable inspect \
+            --format '{{.Digest}}' "docker://${REG}/${IMG}:${TAG}")
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "fedora=${TAG}" >> "$GITHUB_OUTPUT"
+
       # Build image using Buildah action
       - name: Build Image
         id: build_image
@@ -85,7 +144,9 @@ jobs:
           image: ${{ env.MY_IMAGE_NAME }}
           tags: |
             ${{ steps.generate-tags.outputs.alias_tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            dev.sericea.base-digest=${{ steps.basedigest.outputs.digest }}
           oci: false
 
       # Workaround bug where capital letters in your GitHub username make it impossible to push to GHCR.
@@ -95,6 +156,32 @@ jobs:
         uses: ASzc/change-string-case-action@v8
         with:
           string: ${{ env.IMAGE_REGISTRY }}
+
+      # Rechunk re-slices the image into stable, evenly-sized layers so
+      # rpm-ostree upgrades pull much smaller deltas. It flattens the image and
+      # strips labels, so labels are re-applied here and the result is loaded
+      # back into podman storage and re-tagged for the existing push step.
+      - name: Run Rechunker
+        id: rechunk
+        uses: hhd-dev/rechunk@v1.2.4
+        with:
+          rechunk: ghcr.io/hhd-dev/rechunk:v1.2.4
+          ref: localhost/${{ env.MY_IMAGE_NAME }}:${{ steps.generate-tags.outputs.primary }}
+          prev-ref: ${{ steps.registry_case.outputs.lowercase }}/${{ env.MY_IMAGE_NAME }}:latest
+          version: ${{ steps.basedigest.outputs.fedora }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            dev.sericea.base-digest=${{ steps.basedigest.outputs.digest }}
+
+      - name: Load rechunked image and re-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE=$(podman pull ${{ steps.rechunk.outputs.ref }})
+          sudo rm -rf "${{ steps.rechunk.outputs.location }}"
+          for tag in ${{ steps.generate-tags.outputs.alias_tags }}; do
+            podman tag "$IMAGE" "localhost/${MY_IMAGE_NAME}:${tag}"
+          done
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
