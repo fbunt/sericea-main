@@ -1,0 +1,36 @@
+## NVIDIA variant — layered on top of the base sericea-main image.
+#
+# The base image already carries the whole sway / RPMfusion / signing /
+# check-build setup, so this layer only bakes in the GPU bits. RPMfusion is
+# enabled in the base, so the akmod packages resolve here.
+#
+# Build locally against the published base:
+#   podman build -f Containerfile.nvidia -t local-sericea-main-nvidia .
+# Override the base tag (stepping-stone versions) or driver branch:
+#   podman build -f Containerfile.nvidia \
+#     --build-arg SOURCE_TAG=43 \
+#     --build-arg NVIDIA_DRIVER=nvidia-580xx \
+#     -t local-sericea-main-nvidia .
+
+ARG SOURCE_REGISTRY="ghcr.io/fbunt"
+ARG SOURCE_IMAGE="sericea-main"
+ARG SOURCE_TAG="44"
+# Driver branch (akmod-${NVIDIA_DRIVER}). "nvidia-580xx" = proprietary 580 legacy
+# branch, REQUIRED for the GTX 1070 (Pascal) since mainline akmod-nvidia (595)
+# dropped pre-Turing GPUs. "nvidia"/"nvidia-open" are mainline (Turing+).
+ARG NVIDIA_DRIVER="nvidia-580xx"
+
+FROM ${SOURCE_REGISTRY}/${SOURCE_IMAGE}:${SOURCE_TAG}
+
+COPY build-nvidia.sh /tmp/build-nvidia.sh
+COPY check-build-nvidia.sh /tmp/check-build-nvidia.sh
+
+# ARGs declared before FROM are out of scope afterwards; re-declare to use it.
+ARG NVIDIA_DRIVER
+
+RUN mkdir -p /var/lib/alternatives && \
+    NVIDIA_DRIVER="${NVIDIA_DRIVER}" /tmp/build-nvidia.sh && \
+    ostree container commit
+## NOTES:
+# - /var/lib/alternatives is required to prevent failure with some RPM installs
+# - The RUN command must end with ostree container commit

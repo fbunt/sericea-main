@@ -43,7 +43,13 @@ if not rule or rule[0].get("type") != "sigstoreSigned":
     sys.exit(f"check-build: no sigstoreSigned rule for {repo}")
 PY
 
-### 3. bootc image lint (warnings are non-fatal; real errors fail the build)
+### 3. Default wallpaper was decoded to PNG (swaybg has no JXL loader)
+if [ -e /usr/share/backgrounds/default.jxl ] && [ ! -f /usr/share/backgrounds/default.png ]; then
+    echo "check-build: JXL default wallpaper present but no decoded default.png; swaybg will show no wallpaper" >&2
+    exit 1
+fi
+
+### 4. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
 echo "check-build: all checks passed"

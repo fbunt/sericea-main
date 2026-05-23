@@ -122,6 +122,28 @@ rpm-ostree install \
     qemu-kvm \
     virt-manager
 
+
+### Default wallpaper — swaybg can't decode F44's JXL default
+# F44 ships only JXL desktop wallpapers, and the gdk-pixbuf JXL loader the stock
+# sway config asks for (jxl-pixbuf-loader, see /etc/sway/config) has been dropped
+# from Fedora's repos — so swaybg renders no wallpaper out of the box. Decode the
+# resolved default to PNG (ffmpeg, installed above, has a libjxl decoder; PNG is
+# built into gdk-pixbuf) and point sway at it via a config.d drop-in, which the
+# stock config includes after its own bg line, so this one wins. Guarded on the
+# JXL symlink so it no-ops on releases that already ship a raster default.
+if [ -e /usr/share/backgrounds/default.jxl ]; then
+    ffmpeg -hide_banner -loglevel error -y \
+        -i "$(readlink -f /usr/share/backgrounds/default.jxl)" \
+        /usr/share/backgrounds/default.png
+    mkdir -p /usr/share/sway/config.d
+    cat > /usr/share/sway/config.d/10-sericea-wallpaper.conf <<'EOF'
+# Stock sway config points at default.jxl, which swaybg cannot decode (Fedora has
+# no JXL gdk-pixbuf loader). Use the PNG decoded from it at build time instead.
+output * bg /usr/share/backgrounds/default.png fill
+EOF
+fi
+
+
 ### Container signature verification
 # Trust this image's cosign signature (key copied in by the Containerfile) so
 # it can be pulled/rebased with the verified ostree-image-signed transport.
