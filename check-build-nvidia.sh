@@ -17,8 +17,24 @@ esac
 ### 1. Driver packages installed and the kmod actually built
 rpm -q "akmod-${NVIDIA_DRIVER}" >/dev/null
 rpm -q "${CUDA_PKG}" >/dev/null
-if ! find "/usr/lib/modules/${KERNEL}" -name 'nvidia.ko*' | grep -q .; then
+ko="$(find "/usr/lib/modules/${KERNEL}" -name 'nvidia.ko*' | head -1)"
+if [ -z "${ko}" ]; then
     echo "check-build-nvidia: nvidia.ko missing for ${KERNEL}" >&2
+    exit 1
+fi
+
+### 1b. Built the requested variant (open vs proprietary)?
+# The kmod spec auto-detects the GPU to choose open/proprietary; on a headless
+# builder that picks OPEN, which silently breaks pre-Turing GPUs (Pascal etc.).
+# Assert the module license matches the branch so a wrong variant fails the build
+# here, not at the user's boot. proprietary = "NVIDIA", open = "Dual MIT/GPL".
+lic="$(modinfo "${ko}" 2>/dev/null | sed -n 's/^license:[[:space:]]*//p')"
+case "${NVIDIA_DRIVER}" in
+    *-open) want="Dual MIT/GPL" ;;
+    *)      want="NVIDIA" ;;
+esac
+if [ "${lic}" != "${want}" ]; then
+    echo "check-build-nvidia: kmod license '${lic}' != expected '${want}' for ${NVIDIA_DRIVER} (open/proprietary mismatch)" >&2
     exit 1
 fi
 
