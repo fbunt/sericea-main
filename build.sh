@@ -106,8 +106,12 @@ rpm-ostree install \
 
 
 ### Custom packages
+# moby-engine + docker-buildx already arrive as weak deps of the docker stack,
+# but list them explicitly so they're requested packages (won't vanish if a weak
+# dep is ever dropped). podman-compose is the only genuinely missing one.
 rpm-ostree install \
     containerd \
+    docker-buildx \
     docker-cli \
     docker-compose \
     docker-compose-switch \
@@ -115,12 +119,41 @@ rpm-ostree install \
     keychain \
     libvirt \
     mediawriter \
+    moby-engine \
     neovim \
+    podman-compose \
     powertop \
     tio \
     qemu-img \
     qemu-kvm \
     virt-manager
+
+
+### Libvirt + Docker coexistence (VM internet)
+# moby-engine sets the iptables FORWARD policy to DROP and only accepts traffic
+# via its own chains, which excludes libvirt's virbr0 NAT — so virt-manager VMs
+# can reach the host but not the internet. Docker promises never to touch the
+# DOCKER-USER chain, so add virbr0 accept rules there via a oneshot that runs
+# after docker.service. See docs/libvirt-vm-no-internet-fix.md.
+cat > /usr/lib/systemd/system/libvirt-docker-forward.service <<'EOF'
+[Unit]
+Description=Allow libvirt VMs through the Docker FORWARD chain
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iptables -I DOCKER-USER -i virbr0 -j ACCEPT
+ExecStart=/usr/sbin/iptables -I DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+# Enable via a /usr wants symlink (image-managed; no dependence on /etc merge).
+mkdir -p /usr/lib/systemd/system/multi-user.target.wants
+ln -sf ../libvirt-docker-forward.service \
+    /usr/lib/systemd/system/multi-user.target.wants/libvirt-docker-forward.service
 
 
 ### Default wallpaper — swaybg can't decode F44's JXL default
