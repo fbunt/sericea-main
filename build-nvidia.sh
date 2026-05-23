@@ -74,6 +74,19 @@ if [ "${#kmodsrcs[@]}" -ne 1 ]; then
     echo "build-nvidia: expected exactly one kmod srpm in /usr/src/akmods, found ${#kmodsrcs[@]}" >&2
     exit 1
 fi
+
+# Force the PROPRIETARY kmod variant. The kmod spec otherwise does GPU "runtime
+# detection" (open vs proprietary); on a headless builder (CI, no GPU) that picks
+# the OPEN module, which does NOT support pre-Turing GPUs — the Pascal GTX 1070
+# then fails at boot ("not supported by open nvidia.ko ... GSP"). Defining
+# _without_kmod_nvidia_detect skips detection so the default (proprietary) kernel
+# tree is built. akmodsbuild's rpmbuild reads /etc/rpm/macros.* normally. An
+# -open variant is intentionally left to build the open module.
+if [ "${NVIDIA_DRIVER}" != "nvidia-open" ]; then
+    mkdir -p /etc/rpm
+    echo '%_without_kmod_nvidia_detect 1' > /etc/rpm/macros.zz-nvidia-proprietary
+fi
+
 builddir="$(mktemp -d)"
 chown akmods:akmods "${builddir}"
 runuser -u akmods -- /usr/sbin/akmodsbuild --quiet \
