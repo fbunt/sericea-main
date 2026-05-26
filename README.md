@@ -1,81 +1,80 @@
-# image-template
+# sericea-main
 
-# Purpose
+A signed Fedora atomic OCI image: a recreation of the discontinued [ublue `sway-atomic-main`][ublue-927] spin layered on top of Fedora's official [`sway-atomic`][quay-sway-atomic] base, plus an optional proprietary-NVIDIA variant for older (Pascal-era) GPUs. Consumed via the `ostree-image-signed` transport.
 
-This repository is meant to be a template for building your own custom Universal Blue image. This template is the recommended way to make customizations to any image published by the Universal Blue Project:
-- [Aurora](https://getaurora.dev/)
-- [Bazzite](https://bazzite.gg/)
-- [Bluefin](https://projectbluefin.io/)
-- [uCore](https://projectucore.io/)
-- [main](https://github.com/ublue-os/main/)
-- [hwe](https://github.com/ublue-os/hwe/) 
+## Images
 
-This template includes a Containerfile and a Github workflow for building the container image. As soon as the workflow is enabled in your repository, it will build the container image and push it to the Github Container Registry.
+| Image | Tags | Contents |
+|-------|------|----------|
+| [`ghcr.io/fbunt/sericea-main`][pkg-base] | `:latest`, `:44`, `:YYYYMMDD` | Fedora `sway-atomic` + RPMfusion media stack (ffmpeg full codecs) + the [ublue `sway-atomic-main`][ublue-overlay] overlay + custom tools (Docker daemon stack, libvirt + virt-manager, neovim, gparted, …). |
+| [`ghcr.io/fbunt/sericea-main-nvidia`][pkg-nvidia] | `:latest`, `:44`, `:YYYYMMDD` | The base image + `akmod-nvidia-580xx` (proprietary, compiled in-image), CUDA, and the libva-nvidia bridge. Pre-Turing GPUs aren't supported by NVIDIA's open kernel modules, so this image deliberately ships the proprietary kmod; the driver branch is a build arg so an `-open` variant for a Turing+ card is a one-line CI dispatch. |
 
-# Prerequisites
+Each image publishes `:latest` (current Fedora), a Fedora-major tag (e.g. `:44`) for version-pinned references, and a `:YYYYMMDD` snapshot per successful build.
 
-Working knowledge in the following topics:
+## Rebasing to it
 
-- Containers
-  - https://www.youtube.com/watch?v=SnSH8Ht3MIc
-  - https://www.mankier.com/5/Containerfile
-- rpm-ostree
-  - https://coreos.github.io/rpm-ostree/container/
-- Fedora Silverblue (and other Fedora Atomic variants)
-  - https://docs.fedoraproject.org/en-US/fedora-silverblue/
-- Github Workflows
-  - https://docs.github.com/en/actions/using-workflows
+If you're already on a deployment that trusts this image's cosign key (e.g. a sericea-main deployment, or you've previously rebased to one), use the signed transport:
 
-# How to Use
+```bash
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/fbunt/sericea-main:latest
+systemctl reboot
+```
 
-## Template
+If you're coming from a base whose `policy.json` doesn't trust this key yet (stock Fedora, ublue, etc.), the **first** rebase has to use the unverified transport — only after booting on an image that carries this repo's `policy.json` + `cosign.pub` can the signed transport verify it:
 
-Select `Use this Template` and create a new repository from it. To enable the workflows, you may need to go the `Actions` tab of the new repository and click to enable workflows.
+```bash
+sudo rpm-ostree rebase ostree-unverified-registry:ghcr.io/fbunt/sericea-main:latest
+systemctl reboot
+sudo rpm-ostree rebase ostree-image-signed:docker://ghcr.io/fbunt/sericea-main:latest
+systemctl reboot
+```
 
-## Containerfile
+Substitute `sericea-main-nvidia` for the NVIDIA variant — same pattern.
 
-This file defines the operations used to customize the selected image. It contains examples of possible modifications, including how to:
-- change the upstream from which the custom image is derived
-- add additional RPM packages
-- add binaries as a layer from other images
+## Building locally
 
-## Workflows
+```bash
+podman build -f Containerfile -t local-sericea-main .
+```
 
-### build.yml
+Override the Fedora base tag (e.g. for a transient older-Fedora image):
 
-This workflow creates your custom OCI image and publishes it to the Github Container Registry (GHCR). By default, the image name will match the Github repository name.
+```bash
+podman build -f Containerfile --build-arg SOURCE_TAG=43 -t local-sericea-main .
+```
 
-#### Container Signing
+The NVIDIA variant builds `FROM` the published base, so its tag must already exist:
 
-Container signing is important for end-user security and is enabled on all Universal Blue images. It is recommended you set this up, and by default the image builds *will fail* if you don't.
+```bash
+podman build -f Containerfile.nvidia --build-arg SOURCE_TAG=latest -t local-sericea-main-nvidia .
+```
 
-This provides users a method of verifying the image.
+## Signing
 
-1. Install the [cosign CLI tool](https://edu.chainguard.dev/open-source/sigstore/cosign/how-to-install-cosign/#installing-cosign-with-the-cosign-binary)
+Each non-PR build signs with **cosign v2.4.1** — pinned because v3 writes OCI 1.1 referrer bundles that Fedora's `containers/image` stack can't read. Signing is by **tag reference**, not digest, so any pull of `:latest`/`:44`/timestamp resolves to a signed digest. `build.sh` bakes a `policy.json` (default `reject`, with `sigstoreSigned`/`matchRepository` rules scoped to both image repos) and a `registries.d` entry into every image, so a rebased system enforces the signature for future updates. The `SIGNING_SECRET` GitHub Actions secret holds the unencrypted cosign private key; only `cosign.pub` lives in this repo.
 
-2. Run inside your repo folder:
+## CI
 
-    ```bash
-    cosign generate-key-pair
-    ```
+- **`build.yml`** — push, PR, daily schedule, and `workflow_dispatch`. Main builds publish `:latest`, `:44`, and `:YYYYMMDD`. The scheduled run is gated on Fedora's base image digest actually changing (tracked via the `dev.sericea.base-digest` label on the previous `:latest`), so identical days don't rebuild. The `source_tag` dispatch input builds a transient older-Fedora base (e.g. `42`/`43`) without moving `:latest`.
+- **`build-nvidia.yml`** — schedule (30 min after the base) + `workflow_dispatch` only. No push trigger, because the NVIDIA layer's `FROM` needs the matching base tag to exist first. Inputs: `fedora_version` and `nvidia_driver` (default `nvidia-580xx`). Reuses the same cosign signing chain.
+- **`lint.yml`** — `shellcheck` on the four shell scripts, `yamllint` on `.github/`.
+- **`build-iso.yml`** — manual; produces an Anaconda installer ISO from the published image via `bootc-image-builder`.
 
-    
-    - Do NOT put in a password when it asks you to, just press enter. The signing key will be used in GitHub Actions and will not work if it is encrypted.
+## Notable constraints
 
-> [!WARNING]
-> Be careful to *never* accidentally commit `cosign.key` into your git repo.
+Non-obvious gotchas worth knowing before changing the build. Full prose is in [`CLAUDE.md`](./CLAUDE.md).
 
-3. Add the private key to GitHub
+- Don't swap mesa to RPMfusion's `mesa-*-freeworld` drivers — they exact-version-pin Fedora's `mesa-filesystem` and depsolve drift hard-fails the build. `build.sh` intentionally swaps only the ffmpeg stack.
+- The NVIDIA variant must build the **proprietary** kmod. RPMfusion's 580xx kmod spec auto-detects the GPU to choose open vs proprietary, and on a headless CI runner that picks open — which doesn't support pre-Turing GPUs. `build-nvidia.sh` defines `_without_kmod_nvidia_detect` to skip the detection, and `check-build-nvidia.sh` asserts the built kmod's license so a wrong variant fails the build, not the boot.
+- Every `RUN` layer in the `Containerfile`s must end with `ostree container commit`.
+- Never commit `cosign.key` — only `cosign.pub` belongs in the repo.
 
-    - This can also be done manually. Go to your repository settings, under Secrets and Variables -> Actions
-    ![image](https://user-images.githubusercontent.com/1264109/216735595-0ecf1b66-b9ee-439e-87d7-c8cc43c2110a.png)
-    Add a new secret and name it `SIGNING_SECRET`, then paste the contents of `cosign.key` into the secret and save it. Make sure it's the .key file and not the .pub file. Once done, it should look like this:
-    ![image](https://user-images.githubusercontent.com/1264109/216735690-2d19271f-cee2-45ac-a039-23e6a4c16b34.png)
+## Origin & license
 
-    - (CLI instructions) If you have the `github-cli` installed, run:
+The package overlay is sourced from [`ublue-os/main@4d1a14d`][ublue-overlay] (the discontinued `sway-atomic-main` spin, deprecated in [ublue-os/main#927][ublue-927]). The base image is Fedora's official `sway-atomic` (`quay.io/fedora-ostree-desktops/sway-atomic`). Licensed under the [Apache License 2.0](./LICENSE).
 
-    ```bash
-    gh secret set SIGNING_SECRET < cosign.key
-    ```
-
-4. Commit the `cosign.pub` file into your git repository
+[pkg-base]: https://github.com/fbunt/sericea-main/pkgs/container/sericea-main
+[pkg-nvidia]: https://github.com/fbunt/sericea-main/pkgs/container/sericea-main-nvidia
+[ublue-overlay]: https://github.com/ublue-os/main/blob/4d1a14d/packages.json
+[ublue-927]: https://github.com/ublue-os/main/issues/927
+[quay-sway-atomic]: https://quay.io/repository/fedora-ostree-desktops/sway-atomic
