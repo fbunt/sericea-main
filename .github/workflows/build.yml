@@ -84,9 +84,6 @@ jobs:
       - name: Checkout Push to Registry action
         uses: actions/checkout@v6
 
-      - name: Maximize build space
-        uses: ublue-os/remove-unwanted-software@v9
-
       # Effective Fedora base tag: the workflow_dispatch override if given, else
       # the Containerfile's SOURCE_TAG (single source of truth). A "transient"
       # build is a manual override to a Fedora version other than the repo's
