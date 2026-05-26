@@ -39,7 +39,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" output
 
       - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sericea-main-iso
           path: output/**/*.iso
