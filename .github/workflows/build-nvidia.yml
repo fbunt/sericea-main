@@ -6,11 +6,11 @@ name: build-nvidia
 # No push trigger on purpose: this layer FROMs ghcr.io/<owner>/sericea-main:<ver>,
 # which only exists once build.yml has published it. Triggering on a main push
 # would race the base build (and fail outright the first time, before :44 ever
-# exists). Instead it runs on the daily schedule (after the base build) and on
+# exists). Instead it runs on the weekly schedule (after the base build) and on
 # manual dispatch — which is also how the stepping-stone images (42/43) are built.
 on:
   schedule:
-    - cron: '35 10 * * *'  # 30 min after the base build's 10:05 UTC run
+    - cron: '35 10 * * 2'  # 30 min after the base build's Tuesday 10:05 UTC run
   workflow_dispatch:
     inputs:
       fedora_version:
