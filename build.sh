@@ -109,12 +109,15 @@ rpm-ostree install \
 # moby-engine + docker-buildx already arrive as weak deps of the docker stack,
 # but list them explicitly so they're requested packages (won't vanish if a weak
 # dep is ever dropped). podman-compose is the only genuinely missing one.
+# fuse-libs ships /usr/lib64/libfuse.so.2 which AppImage runtimes dlopen to
+# mount their squashfs payload; without it AppImages fail at launch.
 rpm-ostree install \
     containerd \
     docker-buildx \
     docker-cli \
     docker-compose \
     docker-compose-switch \
+    fuse-libs \
     gparted \
     keychain \
     libvirt \

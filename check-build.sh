@@ -18,6 +18,8 @@ IMPORTANT_PACKAGES=(
     qemu-kvm
     virt-manager
     neovim
+    # AppImage runtime (libfuse.so.2)
+    fuse-libs
 )
 
 missing=()
