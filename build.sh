@@ -6,9 +6,19 @@ RELEASE="$(rpm -E %fedora)"
 
 
 ### Enable RPMfusion (required for ffmpeg/codec packages below)
-rpm-ostree install \
-    "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${RELEASE}.noarch.rpm" \
-    "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm"
+# mirrors.rpmfusion.org is a MirrorBrain redirector whose GeoDNS chain
+# occasionally fails to resolve from CI runners. Retry only on DNS-failure
+# signatures so depsolve/signing breaks still fail fast instead of being
+# masked by the loop.
+for i in 1 2 3; do
+    rpm-ostree install \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${RELEASE}.noarch.rpm" \
+        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm" \
+        2> >(tee /tmp/rpmfusion.err >&2) && break
+    grep -qE "dns error|Name or service not known" /tmp/rpmfusion.err || exit 1
+    [ "$i" -eq 3 ] && exit 1
+    sleep $((i * 10))
+done
 
 
 ### Swap Fedora's patent-stripped ffmpeg stack for RPMfusion's full versions
