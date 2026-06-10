@@ -42,6 +42,12 @@ fi
 grep -q '^blacklist nouveau' /usr/lib/modprobe.d/blacklist-nouveau.conf
 grep -q 'nvidia-drm.modeset=1' /usr/lib/bootc/kargs.d/00-nvidia.toml
 
+### 2b. NVIDIA Wayland workarounds baked (software cursors + Firefox XWayland)
+# MOZ_ENABLE_WAYLAND=0 forces Firefox onto XWayland; native Wayland hangs the UI
+# on the NVIDIA EGL compositor path. See docs/firefox-wayland-nvidia-hang.md.
+grep -q '^WLR_NO_HARDWARE_CURSORS=1' /usr/lib/environment.d/90-nvidia-wayland.conf
+grep -q '^MOZ_ENABLE_WAYLAND=0' /usr/lib/environment.d/90-nvidia-wayland.conf
+
 ### 3. Signature policy still enforcing, and now trusts the nvidia repo
 python3 - <<'PY'
 import json, sys
