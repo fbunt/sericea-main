@@ -140,11 +140,19 @@ cat >> /etc/sway/environment <<'EOF'
 SWAY_EXTRA_ARGS=--unsupported-gpu
 EOF
 
-# Software cursors avoid the classic NVIDIA cursor corruption on wlroots.
-# start-sway evals environment.d, so this is picked up for greeter + session.
+# NVIDIA Wayland workarounds, baked session-wide. start-sway evals
+# environment.d, so these are picked up for both the greeter and the session.
 mkdir -p /usr/lib/environment.d
 cat > /usr/lib/environment.d/90-nvidia-wayland.conf <<'EOF'
+# Software cursors avoid the classic NVIDIA cursor corruption on wlroots.
 WLR_NO_HARDWARE_CURSORS=1
+# Force Firefox onto XWayland. Native-Wayland Firefox wedges its whole UI when
+# the proprietary NVIDIA EGL compositor path paints certain page content — a
+# reproducible page-load hang (main thread blocks, window frozen, 0% CPU, no
+# crash; confirmed on driver 580 / GTX 1070). Launching with MOZ_ENABLE_WAYLAND=0
+# routes rendering through XWayland and avoids it. The var only affects Mozilla
+# apps, so scoping it session-wide is safe. See docs/firefox-wayland-nvidia-hang.md.
+MOZ_ENABLE_WAYLAND=0
 EOF
 
 
