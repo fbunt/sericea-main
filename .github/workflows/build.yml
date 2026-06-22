@@ -35,7 +35,7 @@ jobs:
       build: ${{ steps.decide.outputs.build }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Decide whether to build
         id: decide
@@ -82,7 +82,7 @@ jobs:
     steps:
       # Checkout push-to-registry action GitHub repository
       - name: Checkout Push to Registry action
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Effective Fedora base tag: the workflow_dispatch override if given, else
       # the Containerfile's SOURCE_TAG (single source of truth). A "transient"
