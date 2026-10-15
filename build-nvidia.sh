@@ -123,6 +123,22 @@ kargs = [
 EOF
 
 
+### Rebuild the initramfs without nouveau
+# The base image's generic (no-hostonly) initramfs includes nouveau and with it
+# every NVIDIA GSP firmware blob (~100M of a ~234M initramfs). nouveau is already
+# blacklisted in early boot (rd.driver.blacklist above), so it is dead weight, and
+# ostree copies the initramfs into /boot for every deployment — on Fedora's
+# default 1G /boot that leaves room for only ~3 kernels. Nothing else in this
+# layer regenerates the initramfs, so the drop-in only takes effect via the
+# dracut run below. It logs a non-fatal "dracut-install: ERROR: installing
+# '/root'": /root links to var/roothome, which exists only on a booted system.
+cat >/usr/lib/dracut/dracut.conf.d/90-omit-nouveau.conf <<'EOF'
+omit_drivers+=" nouveau "
+EOF
+DRACUT_NO_XATTR=1 dracut --no-hostonly --reproducible --add ostree \
+    --kver "${KERNEL}" -f "/usr/lib/modules/${KERNEL}/initramfs.img"
+
+
 ### sway / wlroots on NVIDIA
 # sway refuses to start on the proprietary driver unless launched with
 # --unsupported-gpu (sway/server.c: "Proprietary drivers are NOT supported").
