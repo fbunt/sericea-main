@@ -20,6 +20,8 @@ IMPORTANT_PACKAGES=(
     neovim
     # AppImage runtime (libfuse.so.2)
     fuse-libs
+    # remote access daemon
+    tailscale
 )
 
 missing=()
@@ -30,6 +32,8 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "check-build: missing expected packages: ${missing[*]}" >&2
     exit 1
 fi
+# tailscaled must start at boot, or remote access is gone after a reboot.
+test -L /usr/lib/systemd/system/multi-user.target.wants/tailscaled.service
 
 ### 2. Signature policy must be valid and enforcing (default: reject)
 python3 - <<'PY'

@@ -241,3 +241,48 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+
+  # PRs only: build the NVIDIA layer on top of the base image this run just
+  # pushed, so changes to build-nvidia.sh / check-build-nvidia.sh are tested
+  # before merge (build-nvidia.yml only runs after merge). Build only, no push.
+  build_nvidia_pr:
+    name: Build NVIDIA layer (no push)
+    runs-on: ubuntu-24.04
+    needs: build_push
+    if: github.event_name == 'pull_request'
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@v9
+
+      # FROM this run's own base push via its commit-SHA tag rather than
+      # :pr-<n>, which a newer push to the same PR could move mid-run.
+      - name: Resolve base image
+        id: base
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # NVIDIA_DRIVER is left at the Containerfile.nvidia default, the branch
+      # build-nvidia.yml publishes.
+      - name: Build Image
+        uses: redhat-actions/buildah-build@v3
+        with:
+          containerfiles: |
+            ./Containerfile.nvidia
+          image: sericea-main-nvidia
+          build-args: |
+            SOURCE_REGISTRY=${{ steps.base.outputs.registry }}
+            SOURCE_IMAGE=${{ env.MY_IMAGE_NAME }}
+            SOURCE_TAG=${{ steps.base.outputs.tag }}
+          tags: |
+            pr-${{ github.event.number }}
+          oci: false

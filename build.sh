@@ -142,6 +142,17 @@ rpm-ostree install \
     virt-manager
 
 
+### Tailscale (remote access over the tailnet)
+# Not packaged by Fedora or RPMfusion; install from Tailscale's stable repo.
+curl -fsSLo /etc/yum.repos.d/tailscale.repo \
+    https://pkgs.tailscale.com/stable/fedora/tailscale.repo
+rpm-ostree install tailscale
+# Enable via a /usr wants symlink (image-managed; no dependence on /etc merge).
+mkdir -p /usr/lib/systemd/system/multi-user.target.wants
+ln -sf ../tailscaled.service \
+    /usr/lib/systemd/system/multi-user.target.wants/tailscaled.service
+
+
 ### Libvirt + Docker coexistence (VM internet)
 # moby-engine sets the iptables FORWARD policy to DROP and only accepts traffic
 # via its own chains, which excludes libvirt's virbr0 NAT — so virt-manager VMs

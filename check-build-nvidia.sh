@@ -48,6 +48,16 @@ grep -q 'nvidia-drm.modeset=1' /usr/lib/bootc/kargs.d/00-nvidia.toml
 grep -q '^WLR_NO_HARDWARE_CURSORS=1' /usr/lib/environment.d/90-nvidia-wayland.conf
 grep -q '^MOZ_ENABLE_WAYLAND=0' /usr/lib/environment.d/90-nvidia-wayland.conf
 
+### 2c. initramfs rebuilt without nouveau's GSP firmware
+# RPMfusion's dracut drop-in already omits the proprietary modules, so any NVIDIA
+# firmware left in the initramfs came from nouveau. List into a variable first so
+# a failing lsinitrd aborts under set -e instead of reading as "no match".
+initrd_files="$(lsinitrd "/usr/lib/modules/${KERNEL}/initramfs.img")"
+if grep -q 'firmware/nvidia/' <<<"${initrd_files}"; then
+    echo "check-build-nvidia: nouveau GSP firmware still in initramfs" >&2
+    exit 1
+fi
+
 ### 3. Signature policy still enforcing, and now trusts the nvidia repo
 python3 - <<'PY'
 import json, sys
