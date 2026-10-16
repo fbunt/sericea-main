@@ -57,10 +57,12 @@ jobs:
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
           VERSION=$(grep -oP '^ARG SOURCE_TAG="\K[^"]+' Containerfile)
           # Rebuild only when the base image we layer on has actually changed.
-          CUR=$(podman run --rm quay.io/skopeo/stable inspect \
-            --format '{{.Digest}}' \
-            "docker://ghcr.io/${OWNER}/${BASE_IMAGE_NAME}:${VERSION}")
-          LAST=$(podman run --rm quay.io/skopeo/stable inspect \
+          # The runner's preinstalled skopeo, not a skopeo container (one less
+          # registry pull to fail). A digest is the sha256 of the raw manifest,
+          # so --raw reads it without fetching the config blob.
+          CUR="sha256:$(skopeo inspect --raw --retry-times 3 \
+            "docker://ghcr.io/${OWNER}/${BASE_IMAGE_NAME}:${VERSION}" | sha256sum | cut -d' ' -f1)"
+          LAST=$(skopeo inspect --retry-times 3 \
             --format '{{ index .Labels "dev.sericea.base-digest" }}' \
             "docker://ghcr.io/${OWNER}/${MY_IMAGE_NAME}:latest" 2>/dev/null || echo "")
           echo "base digest now:    ${CUR}"
@@ -152,15 +154,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DIGEST=$(podman run --rm quay.io/skopeo/stable inspect \
-            --format '{{.Digest}}' \
-            "docker://${{ steps.registry_case.outputs.lowercase }}/${BASE_IMAGE_NAME}:${{ steps.src.outputs.version }}")
+          DIGEST="sha256:$(skopeo inspect --raw --retry-times 3 \
+            "docker://${{ steps.registry_case.outputs.lowercase }}/${BASE_IMAGE_NAME}:${{ steps.src.outputs.version }}" \
+            | sha256sum | cut -d' ' -f1)"
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      # Pull the base in its own step, with retries, so a registry hiccup fails
+      # (or recovers) here instead of surfacing as a "Build Image" failure.
+      # Build Image then uses this local copy (--pull=never).
+      - name: Pull base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${{ steps.registry_case.outputs.lowercase }}/${BASE_IMAGE_NAME}:${{ steps.src.outputs.version }}"
+          for i in 1 2 3; do
+            podman pull "${REF}" && exit 0
+            echo "::warning::Pulling ${REF} failed (attempt ${i}/3)"
+            [ "${i}" -lt 3 ] && sleep $((i * 30))
+          done
+          exit 1
 
       - name: Build Image
         id: build_image
         uses: redhat-actions/buildah-build@v3
         with:
+          extra-args: |
+            --pull=never
           containerfiles: |
             ./Containerfile.nvidia
           image: ${{ env.MY_IMAGE_NAME }}

@@ -53,9 +53,12 @@ jobs:
           IMG=$(grep -oP '^ARG SOURCE_IMAGE="\K[^"]+' Containerfile)
           TAG=$(grep -oP '^ARG SOURCE_TAG="\K[^"]+' Containerfile)
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
-          CUR=$(podman run --rm quay.io/skopeo/stable inspect \
-            --format '{{.Digest}}' "docker://${REG}/${IMG}:${TAG}")
-          LAST=$(podman run --rm quay.io/skopeo/stable inspect \
+          # The runner's preinstalled skopeo, not a skopeo container (one less
+          # registry pull to fail). A digest is the sha256 of the raw manifest,
+          # so --raw reads it without fetching the config blob.
+          CUR="sha256:$(skopeo inspect --raw --retry-times 3 \
+            "docker://${REG}/${IMG}:${TAG}" | sha256sum | cut -d' ' -f1)"
+          LAST=$(skopeo inspect --retry-times 3 \
             --format '{{ index .Labels "dev.sericea.base-digest" }}' \
             "docker://ghcr.io/${OWNER}/${MY_IMAGE_NAME}:latest" 2>/dev/null || echo "")
           echo "base digest now:          ${CUR}"
@@ -157,15 +160,33 @@ jobs:
           REG=$(grep -oP '^ARG SOURCE_REGISTRY="\K[^"]+' Containerfile)
           IMG=$(grep -oP '^ARG SOURCE_IMAGE="\K[^"]+' Containerfile)
           TAG="${{ steps.src.outputs.tag }}"
-          DIGEST=$(podman run --rm quay.io/skopeo/stable inspect \
-            --format '{{.Digest}}' "docker://${REG}/${IMG}:${TAG}")
+          DIGEST="sha256:$(skopeo inspect --raw --retry-times 3 \
+            "docker://${REG}/${IMG}:${TAG}" | sha256sum | cut -d' ' -f1)"
           echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REG}/${IMG}:${TAG}" >> "$GITHUB_OUTPUT"
+
+      # Pull the base in its own step, with retries, so a registry hiccup fails
+      # (or recovers) here instead of surfacing as a "Build Image" failure.
+      # Build Image then uses this local copy (--pull=never).
+      - name: Pull base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${{ steps.basedigest.outputs.ref }}"
+          for i in 1 2 3; do
+            podman pull "${REF}" && exit 0
+            echo "::warning::Pulling ${REF} failed (attempt ${i}/3)"
+            [ "${i}" -lt 3 ] && sleep $((i * 30))
+          done
+          exit 1
 
       # Build image using Buildah action
       - name: Build Image
         id: build_image
         uses: redhat-actions/buildah-build@v3
         with:
+          extra-args: |
+            --pull=never
           containerfiles: |
             ./Containerfile
           # Postfix image name with -custom to make it a little more descriptive
@@ -271,11 +292,27 @@ jobs:
           echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
           echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
+      # Same as the base build: pull separately, with retries, then build with
+      # --pull=never.
+      - name: Pull base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="${{ steps.base.outputs.registry }}/${{ env.MY_IMAGE_NAME }}:${{ steps.base.outputs.tag }}"
+          for i in 1 2 3; do
+            podman pull "${REF}" && exit 0
+            echo "::warning::Pulling ${REF} failed (attempt ${i}/3)"
+            [ "${i}" -lt 3 ] && sleep $((i * 30))
+          done
+          exit 1
+
       # NVIDIA_DRIVER is left at the Containerfile.nvidia default, the branch
       # build-nvidia.yml publishes.
       - name: Build Image
         uses: redhat-actions/buildah-build@v3
         with:
+          extra-args: |
+            --pull=never
           containerfiles: |
             ./Containerfile.nvidia
           image: sericea-main-nvidia
