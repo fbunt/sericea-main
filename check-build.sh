@@ -55,7 +55,11 @@ if [ -e /usr/share/backgrounds/default.jxl ] && [ ! -f /usr/share/backgrounds/de
     exit 1
 fi
 
-### 4. bootc image lint (warnings are non-fatal; real errors fail the build)
+### 4. CA trust bundles are rebuilt at boot
+# Otherwise a local trust change freezes them across upgrades (see build.sh).
+test -L /usr/lib/systemd/system/sysinit.target.wants/ca-trust-extract.service
+
+### 5. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
 echo "check-build: all checks passed"

@@ -201,6 +201,35 @@ EOF
 fi
 
 
+### Rebuild CA trust bundles at boot
+# update-ca-trust writes its extracted bundles (the PEM/OpenSSL/Java files most
+# non-NSS clients read) under /etc. A local trust change (an anchor or blocklist
+# entry plus update-ca-trust) turns them into local modifications that ostree's
+# /etc merge carries forward on every upgrade, so later ca-certificates updates
+# in the image (root removals included) would never reach them. Regenerate them
+# from the current sources early in each boot.
+cat > /usr/lib/systemd/system/ca-trust-extract.service <<'EOF'
+[Unit]
+Description=Rebuild CA trust bundles from current sources
+DefaultDependencies=no
+RequiresMountsFor=/etc/pki/ca-trust/extracted
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/update-ca-trust extract
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+EOF
+# Enable via a /usr wants symlink (image-managed; no dependence on /etc merge).
+mkdir -p /usr/lib/systemd/system/sysinit.target.wants
+ln -sf ../ca-trust-extract.service \
+    /usr/lib/systemd/system/sysinit.target.wants/ca-trust-extract.service
+
+
 ### Container signature verification
 # Trust this image's cosign signature (key copied in by the Containerfile) so
 # it can be pulled/rebased with the verified ostree-image-signed transport.
