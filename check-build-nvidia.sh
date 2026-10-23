@@ -51,8 +51,11 @@ grep -q '^MOZ_ENABLE_WAYLAND=0' /usr/lib/environment.d/90-nvidia-wayland.conf
 ### 2c. initramfs rebuilt without nouveau's GSP firmware
 # RPMfusion's dracut drop-in already omits the proprietary modules, so any NVIDIA
 # firmware left in the initramfs came from nouveau. List into a variable first so
-# a failing lsinitrd aborts under set -e instead of reading as "no match".
+# a failing lsinitrd aborts under set -e instead of reading as "no match";
+# tracing is off for that line because the listing runs to thousands of lines.
+{ set +x; } 2>/dev/null
 initrd_files="$(lsinitrd "/usr/lib/modules/${KERNEL}/initramfs.img")"
+set -x
 if grep -q 'firmware/nvidia/' <<<"${initrd_files}"; then
     echo "check-build-nvidia: nouveau GSP firmware still in initramfs" >&2
     exit 1

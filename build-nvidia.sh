@@ -123,20 +123,26 @@ kargs = [
 EOF
 
 
-### Rebuild the initramfs without nouveau
-# The base image's generic (no-hostonly) initramfs includes nouveau and with it
-# every NVIDIA GSP firmware blob (~100M of a ~234M initramfs). nouveau is already
-# blacklisted in early boot (rd.driver.blacklist above), so it is dead weight, and
-# ostree copies the initramfs into /boot for every deployment — on Fedora's
-# default 1G /boot that leaves room for only ~3 kernels. Nothing else in this
-# layer regenerates the initramfs, so the drop-in only takes effect via the
-# dracut run below. It logs a non-fatal "dracut-install: ERROR: installing
-# '/root'": /root links to var/roothome, which exists only on a booted system.
-cat >/usr/lib/dracut/dracut.conf.d/90-omit-nouveau.conf <<'EOF'
+### Rebuild the initramfs without nouveau, if the base still carries it
+# The base image's build.sh already rebuilds its initramfs without nouveau and
+# its NVIDIA GSP firmware (~106M), which ostree would otherwise copy into /boot
+# for every deployment. Older base tags (the 42/43 stepping stones) predate that,
+# so redo it here only when the base initramfs still has the firmware; rebuilding
+# a current base would just add a second ~132M copy of the same file to this
+# layer. nouveau is blacklisted in early boot anyway (rd.driver.blacklist above).
+# dracut logs a non-fatal "dracut-install: ERROR: installing '/root'": /root
+# links to var/roothome, which exists only on a booted system. Tracing is off
+# for the listing, which runs to thousands of lines.
+{ set +x; } 2>/dev/null
+initrd_files="$(lsinitrd "/usr/lib/modules/${KERNEL}/initramfs.img")"
+set -x
+if grep -q 'firmware/nvidia/' <<<"${initrd_files}"; then
+    cat >/usr/lib/dracut/dracut.conf.d/90-omit-nouveau.conf <<'EOF'
 omit_drivers+=" nouveau "
 EOF
-DRACUT_NO_XATTR=1 dracut --no-hostonly --reproducible --add ostree \
-    --kver "${KERNEL}" -f "/usr/lib/modules/${KERNEL}/initramfs.img"
+    DRACUT_NO_XATTR=1 dracut --no-hostonly --reproducible --add ostree \
+        --kver "${KERNEL}" -f "/usr/lib/modules/${KERNEL}/initramfs.img"
+fi
 
 
 ### sway / wlroots on NVIDIA
