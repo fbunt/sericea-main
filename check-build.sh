@@ -68,7 +68,37 @@ if grep -q 'label: emSign ECC Root CA - G3' <<<"$anchors" ||
     exit 1
 fi
 
-### 6. bootc image lint (warnings are non-fatal; real errors fail the build)
+### 6. initramfs stays slim and still boots ostree
+# ostree keeps one kernel + initramfs per deployment in /boot (see build.sh), so
+# nouveau or another large firmware set creeping back would refill it; fail here
+# instead of at an upgrade's finalize. List into a variable first so a failing
+# lsinitrd aborts under set -e instead of reading as "no match"; tracing is off
+# for that line because the listing runs to thousands of lines.
+KERNEL="$(rpm -q --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}' kernel)"
+initrd="/usr/lib/modules/${KERNEL}/initramfs.img"
+{ set +x; } 2>/dev/null
+initrd_files="$(lsinitrd "${initrd}")"
+set -x
+if grep -q 'firmware/nvidia/' <<<"${initrd_files}"; then
+    echo "check-build: nouveau's NVIDIA firmware is back in the initramfs" >&2
+    exit 1
+fi
+for want in usr/lib/ostree/ostree-prepare-root /drm/amd/amdgpu/amdgpu.ko \
+    /drm/i915/i915.ko /drm/xe/xe.ko; do
+    if ! grep -qF "${want}" <<<"${initrd_files}"; then
+        echo "check-build: initramfs is missing ${want}" >&2
+        exit 1
+    fi
+done
+# ~132M today; the ceiling leaves room for normal firmware growth.
+initrd_max=$((160 * 1024 * 1024))
+initrd_size="$(stat -c %s "${initrd}")"
+if [ "${initrd_size}" -gt "${initrd_max}" ]; then
+    echo "check-build: initramfs is ${initrd_size} bytes (limit ${initrd_max})" >&2
+    exit 1
+fi
+
+### 7. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
 echo "check-build: all checks passed"

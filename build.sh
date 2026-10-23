@@ -307,5 +307,24 @@ EOF
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 
+### Rebuild the initramfs without nouveau
+# Fedora's generic (no-hostonly) initramfs carries every DRM driver, and nouveau
+# drags in all of linux-firmware's NVIDIA GSP blobs: ~106M of a ~238M image.
+# ostree copies kernel + initramfs into /boot for every deployment, so on
+# Fedora's default 1G /boot a third (e.g. pinned) deployment leaves no room for
+# an upgrade, which then fails to finalize with ENOSPC. Without nouveau in the
+# initramfs, NVIDIA machines lose only early KMS and the plymouth splash; nouveau
+# still loads from the real root after switch-root. amdgpu/i915/xe and every
+# dracut module stay. Runs after all package installs so the initramfs matches
+# the final image. It logs a non-fatal "dracut-install: ERROR: installing
+# '/root'": /root links to var/roothome, which exists only on a booted system.
+KERNEL="$(rpm -q --queryformat '%{VERSION}-%{RELEASE}.%{ARCH}' kernel)"
+cat > /usr/lib/dracut/dracut.conf.d/90-omit-nouveau.conf <<'EOF'
+omit_drivers+=" nouveau "
+EOF
+DRACUT_NO_XATTR=1 dracut --no-hostonly --reproducible --add ostree \
+    --kver "${KERNEL}" -f "/usr/lib/modules/${KERNEL}/initramfs.img"
+
+
 ### Build-time smoke test (fails the build if the image is broken)
 /tmp/check-build.sh
