@@ -29,13 +29,8 @@ done
 # ffmpeg packages are actually installed, remove those, and pull in the full
 # RPMfusion versions. Dynamic so future bumps don't break.
 #
-# NOTE: deliberately NOT swapping mesa to RPMfusion's mesa-*-freeworld drivers.
-# Those addon subpackages exact-version-pin Fedora's mesa-filesystem, so whenever
-# the base image's mesa drifts from RPMfusion's freeworld build (frequent: mesa
-# moves fast, RPMfusion lags then leaps past it) the depsolve hard-fails the whole
-# build. Fedora's stock mesa-va-drivers/mesa-vulkan-drivers have shipped the hw
-# video codecs since F40, so the freeworld swap buys little; ublue-os/main dropped
-# it for the same reason. See CLAUDE.md "Key Constraints".
+# NOTE: mesa is not swapped here. Its VA-API drivers get a best-effort freeworld
+# add-on below, which must never fail the build.
 mapfile -t STRIPPED < <(rpm -qa --queryformat '%{NAME}\n' \
     | grep -E '^(ffmpeg-free|libav[a-z]+-free|libsw[a-z]+-free|libpostproc-free)$' || true)
 rpm-ostree override remove "${STRIPPED[@]}" \
@@ -51,6 +46,25 @@ rpm-ostree install \
     gstreamer1-plugins-bad-freeworld \
     gstreamer1-plugins-ugly \
     libheif-freeworld
+
+
+### Best-effort H.264/HEVC VA-API drivers (RPMfusion mesa-va-drivers-freeworld)
+# Fedora builds mesa's VA-API drivers (now shipped in mesa-dri-drivers) without
+# the patent-encumbered codecs: on F44 radeonsi, vainfo lists JPEG, VP9 and AV1
+# but no H.264/HEVC. The freeworld build adds them under /usr/lib64/dri-freeworld,
+# which Fedora's libva searches before /usr/lib64/dri (its compiled-in path is
+# dri-nonfree:dri-freeworld:dri), so it wins with no env var. It also puts its
+# full libgallium build on the ld.so path (GL loads it too) and exact-pins
+# mesa-filesystem to its version. RPMfusion's build often lags or leads Fedora's
+# mesa, so request only the build matching the installed mesa version;
+# rpm-ostree never moves base packages, so a missing build or failed depsolve
+# just warns and the image ships without it. mesa-vulkan-drivers-freeworld is
+# left out: it conflicts with mesa-vulkan-drivers and VA-API is what video
+# playback uses.
+if ! MESA_VERSION="$(rpm -q --queryformat '%{VERSION}\n' mesa-filesystem | head -n1)" ||
+    ! rpm-ostree install "mesa-va-drivers-freeworld-${MESA_VERSION}"; then
+    echo "WARNING: installing mesa-va-drivers-freeworld matching mesa-filesystem '${MESA_VERSION}' failed (no matching RPMfusion build, depsolve or mirror error); image ships without H.264/HEVC VA-API"
+fi
 
 
 ### ublue sway-atomic-main overlay
