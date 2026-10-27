@@ -154,30 +154,34 @@ ln -sf ../tailscaled.service \
 
 
 ### Libvirt + Docker coexistence (VM internet)
-# moby-engine sets the iptables FORWARD policy to DROP and only accepts traffic
-# via its own chains, which excludes libvirt's virbr0 NAT — so virt-manager VMs
-# can reach the host but not the internet. Docker promises never to touch the
-# DOCKER-USER chain, so add virbr0 accept rules there via a oneshot that runs
-# after docker.service. See docs/libvirt-vm-no-internet-fix.md.
+# When dockerd turns on IP forwarding it sets the iptables FORWARD policy to DROP
+# and only accepts traffic via its own chains, which excludes libvirt's virbr0
+# NAT — so virt-manager VMs can reach the host but not the internet. dockerd
+# never alters rules in the DOCKER-USER chain, so add virbr0 accept rules there
+# via a oneshot hooked onto docker.service. It is wanted by docker.service, not
+# multi-user.target, and must not Want= it back: dockerd starts on demand from
+# docker.socket (Fedora's preset) instead of idling from boot. PartOf= re-runs
+# it on a docker restart; the rules outlive dockerd restarts, so each is checked
+# (-C) before it is inserted. See docs/libvirt-vm-no-internet-fix.md.
 cat > /usr/lib/systemd/system/libvirt-docker-forward.service <<'EOF'
 [Unit]
 Description=Allow libvirt VMs through the Docker FORWARD chain
 After=docker.service
-Wants=docker.service
+PartOf=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/iptables -I DOCKER-USER -i virbr0 -j ACCEPT
-ExecStart=/usr/sbin/iptables -I DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER -i virbr0 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I DOCKER-USER -i virbr0 -j ACCEPT'
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=docker.service
 EOF
 # Enable via a /usr wants symlink (image-managed; no dependence on /etc merge).
-mkdir -p /usr/lib/systemd/system/multi-user.target.wants
+mkdir -p /usr/lib/systemd/system/docker.service.wants
 ln -sf ../libvirt-docker-forward.service \
-    /usr/lib/systemd/system/multi-user.target.wants/libvirt-docker-forward.service
+    /usr/lib/systemd/system/docker.service.wants/libvirt-docker-forward.service
 
 
 ### Default wallpaper — swaybg can't decode F44's JXL default

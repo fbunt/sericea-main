@@ -98,7 +98,22 @@ if [ "${initrd_size}" -gt "${initrd_max}" ]; then
     exit 1
 fi
 
-### 7. bootc image lint (warnings are non-fatal; real errors fail the build)
+### 7. Docker starts on demand from docker.socket, not at boot
+# An idle dockerd + containerd from boot costs battery for nothing. The libvirt
+# forward rules hang off docker.service (see build.sh); nothing in the image may
+# enable docker.service or pull it in.
+if [ ! -L /usr/lib/systemd/system/docker.service.wants/libvirt-docker-forward.service ]; then
+    echo "check-build: libvirt-docker-forward.service is not wanted by docker.service" >&2
+    exit 1
+fi
+if compgen -G '/usr/lib/systemd/system/*.wants/docker.service' >/dev/null ||
+    grep -lE '^(Wants|Requires|BindsTo)=(.*[[:space:]])?docker\.service' \
+        /usr/lib/systemd/system/*.service /usr/lib/systemd/system/*.target; then
+    echo "check-build: docker.service is started at boot; it should start from docker.socket" >&2
+    exit 1
+fi
+
+### 8. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
 echo "check-build: all checks passed"

@@ -4,6 +4,11 @@
 > `libvirt-docker-forward.service` (the "Permanent fix" below), so a fresh
 > sericea-main install handles this automatically. This doc is kept as the
 > rationale + diagnostics for the rule, and for systems that predate the fix.
+> The image hooks the unit onto `docker.service`, so Docker still starts on
+> demand from `docker.socket`. A system that followed the manual steps below
+> before that has an `/etc` copy that shadows the image's unit and pulls Docker
+> in at every boot; drop it with
+> `sudo systemctl disable libvirt-docker-forward.service && sudo systemctl revert libvirt-docker-forward.service`.
 
 ## Symptom
 
@@ -42,31 +47,35 @@ so don't leave it this way.
 
 Docker guarantees it won't touch rules in the `DOCKER-USER` chain (first jump
 in `FORWARD`). Put explicit accept rules for `virbr0` there via a systemd
-oneshot service so they re-apply on every boot after Docker starts.
+oneshot service that runs whenever Docker starts. `WantedBy=docker.service`
+(rather than `Wants=docker.service`) keeps Docker socket-activated instead of
+starting it at boot; `PartOf=` re-runs the unit on `systemctl restart docker`.
+The rules survive dockerd restarts, so each one is checked (`-C`) before it is
+inserted.
 
 Create `/etc/systemd/system/libvirt-docker-forward.service`:
 
 ```ini
 [Unit]
-Description=Allow libvirt VMs through Docker FORWARD chain
+Description=Allow libvirt VMs through the Docker FORWARD chain
 After=docker.service
-Wants=docker.service
+PartOf=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/iptables -I DOCKER-USER -i virbr0 -j ACCEPT
-ExecStart=/usr/sbin/iptables -I DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER -i virbr0 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I DOCKER-USER -i virbr0 -j ACCEPT'
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=docker.service
 ```
 
-Enable and start:
+Enable it (it runs the next time Docker starts):
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now libvirt-docker-forward.service
+sudo systemctl enable libvirt-docker-forward.service
 ```
 
 The inbound rule is conntrack-limited to `RELATED,ESTABLISHED`, so it only
