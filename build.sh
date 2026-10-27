@@ -133,6 +133,7 @@ rpm-ostree install \
     libvirt \
     mediawriter \
     moby-engine \
+    ncdu \
     neovim \
     podman-compose \
     powertop \
