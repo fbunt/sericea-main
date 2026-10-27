@@ -116,7 +116,7 @@ fi
 ### 8. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
-### 8. Report the best-effort freeworld VA-API drivers (never fails)
+### 9. Report the best-effort freeworld VA-API drivers (never fails)
 # build.sh installs them only when RPMfusion has a build matching Fedora's mesa,
 # so their absence is expected at times.
 if rpm -q mesa-va-drivers-freeworld; then
