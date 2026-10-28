@@ -55,7 +55,7 @@ Each non-PR build signs with **cosign v2.4.1** — pinned because v3 writes OCI 
 
 ## CI
 
-- **`build.yml`** — push, PR, daily schedule, and `workflow_dispatch`. Main builds publish `:latest`, `:44`, and `:YYYYMMDD`. The scheduled run is gated on Fedora's base image digest actually changing (tracked via the `dev.sericea.base-digest` label on the previous `:latest`), so identical days don't rebuild. The `source_tag` dispatch input builds a transient older-Fedora base (e.g. `42`/`43`) without moving `:latest`.
+- **`build.yml`** — push, PR, weekly schedule (Tuesdays 10:05 UTC), and `workflow_dispatch`. Main builds publish `:latest`, `:44`, and `:YYYYMMDD`. The scheduled run is gated on Fedora's base image digest actually changing (tracked via the `dev.sericea.base-digest` label on the previous `:latest`), so weeks with no base change don't rebuild. The `source_tag` dispatch input builds a transient older-Fedora base (e.g. `42`/`43`) without moving `:latest`.
 - **`build-nvidia.yml`** — schedule (30 min after the base) + `workflow_dispatch` only. No push trigger, because the NVIDIA layer's `FROM` needs the matching base tag to exist first. Inputs: `fedora_version` and `nvidia_driver` (default `nvidia-580xx`). Reuses the same cosign signing chain.
 - **`lint.yml`** — `shellcheck` on the four shell scripts, `yamllint` on `.github/`.
 - **`build-iso.yml`** — manual; produces an Anaconda installer ISO from the published image via `bootc-image-builder`.
