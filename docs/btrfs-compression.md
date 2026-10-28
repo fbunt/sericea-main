@@ -43,18 +43,23 @@ cat /proc/cmdline           # look for rootflags=
 ## Enable
 
 ```bash
-sudo rpm-ostree kargs --replace=rootflags=subvol=root,compress=zstd:1
+sudo rpm-ostree kargs --delete=rootflags=subvol=root \
+    --append=rootflags=subvol=root,compress=zstd:1
 systemctl reboot
 findmnt -no OPTIONS /var    # should now include compress=zstd:1
 ```
 
-Keep `subvol=root` (or whatever `rootflags=` already holds) in the new value;
-`--replace` rewrites the whole argument.
+Keep `subvol=root` (or whatever `rootflags=` already holds) in the new value.
+Don't use `--replace` here: it parses `KEY=VALUE=NEWVALUE`, so a value that
+itself contains `=` is split wrongly ("No karg 'rootflags=subvol' found").
+Deleting the old argument and appending the new one in one command does the
+same thing as a single deployment.
 
 ## Disable
 
 ```bash
-sudo rpm-ostree kargs --replace=rootflags=subvol=root
+sudo rpm-ostree kargs --delete=rootflags=subvol=root,compress=zstd:1 \
+    --append=rootflags=subvol=root
 systemctl reboot
 ```
 
