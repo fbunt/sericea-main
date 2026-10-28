@@ -69,6 +69,27 @@ sudo systemctl restart NetworkManager
 
 If it degrades, run `sudo iw dev wlp1s0 set power_save off` and keep the file.
 
+The override is reapplied whenever NetworkManager reconnects, including after
+resume, so set power save on again before testing the resumed state.
+
+### Results, 2026-10-27
+
+X13 Gen 3 AMD, kernel 7.2.12, firmware `.41`, BIOS 1.52, 5 GHz at about
+-53 dBm. Ping went to the gateway, and the speed test used
+`speed.cloudflare.com`.
+
+| Power save | Ping avg (1 s interval) | Download | Upload | Idle draw on battery |
+|---|---|---|---|---|
+| off | ~11 ms | 140–190 Mbit/s | 23 Mbit/s | 3.4 W |
+| on | ~20 ms | 130–194 Mbit/s | 23 Mbit/s | 4.5 W |
+| on, after resume | ~17–21 ms | 156–266 Mbit/s | 24 Mbit/s | 4.2 W |
+
+There was no packet loss or throughput collapse, before or after resume, so
+the old failure no longer reproduces. Power save roughly doubles latency, and
+it gave no measurable battery saving: idle draw varies by about 1 W between
+samples, which is more than Wi-Fi power save saves on an idle link. The
+override stays.
+
 [ps-enable]: https://github.com/torvalds/linux/commit/b2beffa7d9a67b59b085616a27f1d10b1e80784f
 [fedora]: https://discussion.fedoraproject.org/t/thinkpad-t14s-amd-gen3-6-7-x-kernels-suspend-crashes-qcnfa765-ath11k-wifi-issue/104887
 [commit]: https://github.com/torvalds/linux/commit/01296b39d3515f20a1db64d3c421c592b1e264a0
