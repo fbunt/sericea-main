@@ -22,6 +22,8 @@ IMPORTANT_PACKAGES=(
     fuse-libs
     # remote access daemon
     tailscale
+    # firmware updates (fwupd-refresh.timer is enabled below)
+    fwupd
 )
 
 missing=()
@@ -34,6 +36,8 @@ if [ "${#missing[@]}" -gt 0 ]; then
 fi
 # tailscaled must start at boot, or remote access is gone after a reboot.
 test -L /usr/lib/systemd/system/multi-user.target.wants/tailscaled.service
+# Without the refresh timer fwupdmgr never sees published firmware updates.
+test -L /usr/lib/systemd/system/timers.target.wants/fwupd-refresh.timer
 
 ### 2. Signature policy must be valid and enforcing (default: reject)
 python3 - <<'PY'

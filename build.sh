@@ -168,6 +168,15 @@ ln -sf ../tailscaled.service \
     /usr/lib/systemd/system/multi-user.target.wants/tailscaled.service
 
 
+### Keep firmware update metadata current
+# Fedora doesn't enable fwupd-refresh.timer, so without it fwupdmgr never
+# downloads LVFS metadata and reports no BIOS/EC updates even when Lenovo has
+# published some.
+mkdir -p /usr/lib/systemd/system/timers.target.wants
+ln -sf ../fwupd-refresh.timer \
+    /usr/lib/systemd/system/timers.target.wants/fwupd-refresh.timer
+
+
 ### Libvirt + Docker coexistence (VM internet)
 # When dockerd turns on IP forwarding it sets the iptables FORWARD policy to DROP
 # and only accepts traffic via its own chains, which excludes libvirt's virbr0
