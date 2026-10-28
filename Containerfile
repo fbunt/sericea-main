@@ -19,6 +19,8 @@ FROM ${SOURCE_REGISTRY}/${SOURCE_IMAGE}:${SOURCE_TAG}
 
 COPY build.sh /tmp/build.sh
 COPY check-build.sh /tmp/check-build.sh
+# Opt-in hibernation setup command; build.sh installs it to /usr/bin.
+COPY enable-hibernation /tmp/enable-hibernation
 
 # Cosign public key used to verify this image's signatures (see build.sh, which
 # wires up the registries.d + policy.json entries that consume it).

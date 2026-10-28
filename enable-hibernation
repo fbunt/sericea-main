@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# enable-hibernation: create the disk swap file that hibernation needs.
+#
+# The image already ships everything else, inert until this runs (see
+# docs/hibernation.md): the SELinux label rule for /var/swap, the
+# var-swap-swapfile.swap unit (conditioned on the file existing), and the
+# logind/sleep drop-ins that make a closed lid suspend, then hibernate after
+# 30 minutes.
+# This command adds the per-machine part:
+#   - /var/swap: a dedicated btrfs subvolume, so snapshots of the parent
+#     subvolume never include (or get blocked by) the swap file.
+#   - /var/swap/swapfile: a NOCOW swap file (16 GiB unless --size), SELinux
+#     type swapfile_t.
+# and starts the swap unit. The unit uses priority 10, below zram0 (100), so
+# zram still takes normal swapping and the disk file is overflow plus the
+# hibernation target.
+#
+# No resume=/resume_offset= kernel args: systemd-sleep writes the swap location
+# to the HibernateLocation EFI variable and the initramfs's
+# systemd-hibernate-resume-generator resumes from it.
+#
+# Safe to re-run: every step checks current state first. Run as root.
+
+set -euo pipefail
+
+readonly SWAP_DIR=/var/swap
+readonly SWAP_FILE=$SWAP_DIR/swapfile
+readonly SWAP_PRIORITY=10
+readonly FREE_SPACE_MARGIN_BYTES=$((8 * 1024 * 1024 * 1024))
+readonly GIB=$((1024 * 1024 * 1024))
+
+die()  { echo "error: $*" >&2; exit 1; }
+note() { echo "==> $*"; }
+
+usage() {
+    cat <<EOF
+Usage: enable-hibernation [--size N[G]] [--allow-nvidia]
+
+Create the btrfs subvolume $SWAP_DIR and the swap file $SWAP_FILE that
+hibernation and suspend-then-hibernate need, then activate it. Run as root.
+
+  --size N[G]     swap file size in whole GiB (default 16). Should cover the
+                  memory in use at hibernation time; RAM size is the safe pick.
+  --allow-nvidia  run even though an NVIDIA kernel driver is present.
+                  Hibernating and resuming with that driver has not been tested
+                  on this image; a failed resume can leave the display broken
+                  or lose the hibernated session.
+  -h, --help      show this help
+EOF
+}
+
+size_gib=16
+size_given=
+allow_nvidia=
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --size)
+            [[ $# -ge 2 ]] || die "--size needs a value, e.g. --size 32G"
+            [[ $2 =~ ^([1-9][0-9]*)[gG]?$ ]] || die "--size takes whole GiB, e.g. --size 32G (got '$2')"
+            size_gib=${BASH_REMATCH[1]}
+            size_given=1
+            shift 2
+            ;;
+        --allow-nvidia) allow_nvidia=1; shift ;;
+        -h | --help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+readonly SWAP_BYTES=$((size_gib * GIB))
+
+# ---------------------------------------------------------------- preflight
+[[ $EUID -eq 0 ]] || die "run as root (sudo enable-hibernation)"
+
+for cmd in btrfs restorecon matchpathcon systemd-escape swapon blkid lsattr modinfo; do
+    command -v "$cmd" >/dev/null || die "missing command: $cmd"
+done
+
+# The NVIDIA image gets NVIDIA's power-management setup from the driver's -power
+# package (NVreg_PreserveVideoMemoryAllocations=1 and the nvidia-suspend,
+# -hibernate and -resume units, enabled by its preset), but hibernate and resume
+# with that driver have not been tested here. Refuse when the module is loaded
+# or installed for the running kernel; nouveau is a different module and does
+# not trip this.
+if [[ -z $allow_nvidia ]] &&
+    { [[ -d /sys/module/nvidia ]] || modinfo -k "$(uname -r)" nvidia >/dev/null 2>&1; }; then
+    die "the NVIDIA kernel driver is present; hibernating and resuming with it" \
+        "has not been tested on this image, and a failed resume can lose the session." \
+        "Pass --allow-nvidia to set up hibernation anyway."
+fi
+
+[[ "$(findmnt -no FSTYPE --target /var)" == btrfs ]] || die "/var is not on btrfs"
+data_profiles=$(btrfs filesystem df /var)
+grep -q '^Data, single:' <<<"$data_profiles" \
+    || die "btrfs data profile is not 'single'; swap files need a single-device, non-RAID data profile"
+
+grep -qw disk /sys/power/state || die "kernel does not offer hibernation (/sys/power/state lacks 'disk')"
+if [[ -r /sys/kernel/security/lockdown ]] && ! grep -q '\[none\]' /sys/kernel/security/lockdown; then
+    die "kernel lockdown is active (Secure Boot?); it disables hibernation"
+fi
+[[ -d /sys/firmware/efi/efivars ]] \
+    || die "not an EFI boot; this setup relies on the HibernateLocation EFI variable (add resume=/resume_offset= kargs instead)"
+
+# The image carries the label rule; without it logind and systemd-sleep are
+# denied the file and report hibernation as unavailable.
+[[ "$(matchpathcon -n "$SWAP_FILE")" == *:swapfile_t:* ]] \
+    || die "no SELinux file context maps $SWAP_FILE to swapfile_t; is this image's /etc/selinux/targeted current?"
+
+swap_unit=$(systemd-escape -p --suffix=swap "$SWAP_FILE")
+systemctl cat "$swap_unit" >/dev/null 2>&1 \
+    || die "$swap_unit is not installed; this command needs the unit the image ships"
+
+# ---------------------------------------------------------------- subvolume
+if [[ -e $SWAP_DIR ]]; then
+    btrfs subvolume show "$SWAP_DIR" >/dev/null 2>&1 \
+        || die "$SWAP_DIR exists but is not a btrfs subvolume; move it aside and re-run"
+    note "$SWAP_DIR subvolume already exists"
+else
+    note "creating btrfs subvolume $SWAP_DIR"
+    btrfs subvolume create "$SWAP_DIR"
+    chmod 0700 "$SWAP_DIR"
+fi
+restorecon -R "$SWAP_DIR"
+
+# ---------------------------------------------------------------- swap file
+if [[ -e $SWAP_FILE ]]; then
+    note "$SWAP_FILE already exists, checking it"
+    [[ -f $SWAP_FILE ]] || die "$SWAP_FILE is not a regular file"
+    actual_bytes=$(stat -c %s "$SWAP_FILE")
+    if [[ -n $size_given ]] && (( actual_bytes != SWAP_BYTES )); then
+        die "$SWAP_FILE is $((actual_bytes / GIB)) GiB, not ${size_gib} GiB;" \
+            "swapoff and delete it to recreate"
+    fi
+    swap_attrs=$(lsattr "$SWAP_FILE")
+    [[ ${swap_attrs%% *} == *C* ]] \
+        || die "$SWAP_FILE is not NOCOW; swapoff and delete it to recreate"
+    [[ "$(blkid -o value -s TYPE "$SWAP_FILE")" == swap ]] \
+        || die "$SWAP_FILE has no swap signature; swapoff and delete it to recreate"
+else
+    avail=$(df -B1 --output=avail /var | tail -n 1 | tr -d ' ')
+    (( avail >= SWAP_BYTES + FREE_SPACE_MARGIN_BYTES )) \
+        || die "only $((avail / GIB)) GiB free on /var; need ${size_gib} GiB plus 8 GiB headroom"
+    note "creating ${size_gib} GiB swap file $SWAP_FILE"
+    # mkswapfile sets NOCOW (which also disables compression), preallocates
+    # and writes the swap header in one step.
+    btrfs filesystem mkswapfile --size "${size_gib}g" "$SWAP_FILE"
+    chmod 0600 "$SWAP_FILE"
+fi
+restorecon "$SWAP_FILE"
+[[ "$(stat -c %C "$SWAP_FILE")" == *:swapfile_t:* ]] \
+    || die "$SWAP_FILE is not labelled swapfile_t: $(stat -c %C "$SWAP_FILE")"
+
+# ---------------------------------------------------------------- swap unit
+# Enabled by the image (swap.target.wants); its ConditionPathExists= kept it
+# inactive until now. Starting it re-checks the condition.
+systemctl start "$swap_unit"
+systemctl -q is-active "$swap_unit" || die "$swap_unit did not start; see: journalctl -u $swap_unit"
+
+zram_prio=$(awk '$1 ~ "^/dev/zram" {print $5; exit}' /proc/swaps)
+if [[ -z $zram_prio ]]; then
+    echo "warning: no zram swap active; the disk swap file will take all swapping" >&2
+elif (( zram_prio <= SWAP_PRIORITY )); then
+    echo "warning: zram priority $zram_prio is not above $SWAP_PRIORITY" >&2
+fi
+
+# ---------------------------------------------------------------- status
+note "swap:"
+swapon --show
+note "SELinux label: $(stat -c %C "$SWAP_FILE")"
+note "resume offset (pages): $(btrfs inspect-internal map-swapfile -r "$SWAP_FILE")"
+for method in CanHibernate CanSuspendThenHibernate; do
+    note "$method: $(busctl call org.freedesktop.login1 /org/freedesktop/login1 \
+        org.freedesktop.login1.Manager "$method" | awk '{print $2}')"
+done
+note "HandleLidSwitch: $(busctl get-property org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager HandleLidSwitch | awk '{print $2}')"

@@ -326,6 +326,68 @@ EOF
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 
+### Suspend-then-hibernate (opt-in per machine; see docs/hibernation.md)
+# s2idle drains a closed laptop in a few days, so a closed lid suspends and then
+# hibernates after 30 minutes. Hibernation needs a disk swap file, which is
+# per-machine state in /var: enable-hibernation creates it. Everything here is
+# inert until then. logind falls back to plain suspend when suspend-then-hibernate is not
+# possible (no swap file), and machines without a lid never see a lid event.
+# Lid closed with an external display or dock: ignore (logind's default), so
+# clamshell use with a monitor keeps working.
+mkdir -p /usr/lib/systemd/logind.conf.d /usr/lib/systemd/sleep.conf.d
+cat > /usr/lib/systemd/logind.conf.d/60-lid-suspend-then-hibernate.conf <<'EOF'
+# Closed lid: suspend, then hibernate after HibernateDelaySec (sleep.conf.d).
+# Without a usable swap file logind falls back to plain suspend.
+[Login]
+HandleLidSwitch=suspend-then-hibernate
+HandleLidSwitchExternalPower=suspend-then-hibernate
+HandleLidSwitchDocked=ignore
+EOF
+# HibernateOnACPower keeps its default (yes): it hibernates after 30min on AC too.
+cat > /usr/lib/systemd/sleep.conf.d/60-hibernate-delay.conf <<'EOF'
+[Sleep]
+HibernateDelaySec=30min
+EOF
+# The swap file's unit. ConditionPathExists keeps it a no-op until
+# enable-hibernation creates the file. Priority 10 sits below zram0 (100), so
+# zram still takes normal swapping and the disk file is overflow plus the
+# hibernation target.
+cat > /usr/lib/systemd/system/var-swap-swapfile.swap <<'EOF'
+[Unit]
+Description=Disk swap file for hibernation and zram overflow
+Documentation=man:systemd.swap(5)
+ConditionPathExists=/var/swap/swapfile
+
+[Swap]
+What=/var/swap/swapfile
+Priority=10
+
+[Install]
+WantedBy=swap.target
+EOF
+# Enable via a /usr wants symlink (image-managed; no dependence on /etc merge).
+mkdir -p /usr/lib/systemd/system/swap.target.wants
+ln -sf ../var-swap-swapfile.swap \
+    /usr/lib/systemd/system/swap.target.wants/var-swap-swapfile.swap
+# logind (CanHibernate) and systemd-sleep may only read a swap file labelled
+# swapfile_t; under the default var_t they are denied and report hibernation
+# as unavailable. The rule is set here, not by semanage on the host, because a
+# runtime semanage rewrites /etc/selinux/targeted, which then stops following
+# image updates. It prints a harmless "Invalid cross-device link" warning.
+semanage fcontext -a -t swapfile_t '/var/swap(/.*)?'
+# systemd-sleep stores its battery discharge-rate estimate in
+# /var/lib/systemd/sleep, but SELinux lets it create files only inside that dir
+# (systemd_sleep_var_lib_t), not create the dir itself under /var/lib/systemd.
+# Nothing else creates it, so it would fall back to a fixed 1h estimate; have
+# tmpfiles create it at boot, labelled from the policy's file contexts.
+cat > /usr/lib/tmpfiles.d/systemd-sleep-state.conf <<'EOF'
+# State dir for systemd-sleep's battery discharge-rate estimate; systemd-sleep
+# itself is not allowed to create it.
+d /var/lib/systemd/sleep 0755 root root -
+EOF
+install -m 0755 /tmp/enable-hibernation /usr/bin/enable-hibernation
+
+
 ### Rebuild the initramfs without nouveau
 # Fedora's generic (no-hostonly) initramfs carries every DRM driver, and nouveau
 # drags in all of linux-firmware's NVIDIA GSP blobs: ~106M of a ~238M image.
