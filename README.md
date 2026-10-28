@@ -57,7 +57,7 @@ Each non-PR build signs with **cosign v2.4.1** — pinned because v3 writes OCI 
 
 - **`build.yml`** — push, PR, weekly schedule (Tuesdays 10:05 UTC), and `workflow_dispatch`. Main builds publish `:latest`, `:44`, and `:YYYYMMDD`. The scheduled run is gated on Fedora's base image digest actually changing (tracked via the `dev.sericea.base-digest` label on the previous `:latest`), so weeks with no base change don't rebuild. The `source_tag` dispatch input builds a transient older-Fedora base (e.g. `42`/`43`) without moving `:latest`.
 - **`build-nvidia.yml`** — schedule (30 min after the base) + `workflow_dispatch` only. No push trigger, because the NVIDIA layer's `FROM` needs the matching base tag to exist first. Inputs: `fedora_version` and `nvidia_driver` (default `nvidia-580xx`). Reuses the same cosign signing chain.
-- **`lint.yml`** — `shellcheck` on the four shell scripts, `yamllint` on `.github/`.
+- **`lint.yml`** — `shellcheck` on the shell scripts, `yamllint` on `.github/`.
 - **`build-iso.yml`** — manual; produces an Anaconda installer ISO from the published image via `bootc-image-builder`.
 
 ## Notable constraints
@@ -66,6 +66,7 @@ Non-obvious gotchas worth knowing before changing the build. Full prose is in [`
 
 - RPMfusion's `mesa-va-drivers-freeworld` (H.264/HEVC VA-API, which Fedora's mesa lacks) is best-effort: it exact-version-pins Fedora's `mesa-filesystem`, so `build.sh` installs it only when RPMfusion has a build matching the base image's mesa and otherwise warns and ships without it. Don't make it required or add `mesa-vulkan-drivers-freeworld`.
 - The NVIDIA variant must build the **proprietary** kmod. RPMfusion's 580xx kmod spec auto-detects the GPU to choose open vs proprietary, and on a headless CI runner that picks open — which doesn't support pre-Turing GPUs. `build-nvidia.sh` defines `_without_kmod_nvidia_detect` to skip the detection, and `check-build-nvidia.sh` asserts the built kmod's license so a wrong variant fails the build, not the boot.
+- Suspend-then-hibernate ships inert; `sudo enable-hibernation` creates the swap file that turns it on ([`docs/hibernation.md`](./docs/hibernation.md)). Keep dracut's `resume` module in the initramfs and the swap unit's `ConditionPathExists=`; the lid setting relies on logind falling back to plain suspend when there is no swap file.
 - Every `RUN` layer in the `Containerfile`s must end with `ostree container commit`.
 - Never commit `cosign.key` — only `cosign.pub` belongs in the repo.
 

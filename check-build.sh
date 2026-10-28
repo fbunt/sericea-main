@@ -83,8 +83,10 @@ if grep -q 'firmware/nvidia/' <<<"${initrd_files}"; then
     echo "check-build: nouveau's NVIDIA firmware is back in the initramfs" >&2
     exit 1
 fi
+# systemd-hibernate-resume (dracut's resume module) is what resumes from the
+# HibernateLocation EFI variable; without it hibernation is a cold boot.
 for want in usr/lib/ostree/ostree-prepare-root /drm/amd/amdgpu/amdgpu.ko \
-    /drm/i915/i915.ko /drm/xe/xe.ko; do
+    /drm/i915/i915.ko /drm/xe/xe.ko usr/lib/systemd/systemd-hibernate-resume; do
     if ! grep -qF "${want}" <<<"${initrd_files}"; then
         echo "check-build: initramfs is missing ${want}" >&2
         exit 1
@@ -113,10 +115,34 @@ if compgen -G '/usr/lib/systemd/system/*.wants/docker.service' >/dev/null ||
     exit 1
 fi
 
-### 8. bootc image lint (warnings are non-fatal; real errors fail the build)
+### 8. Suspend-then-hibernate pieces are in place (inert until enable-hibernation)
+for f in /usr/lib/systemd/logind.conf.d/60-lid-suspend-then-hibernate.conf \
+    /usr/lib/systemd/sleep.conf.d/60-hibernate-delay.conf \
+    /usr/lib/systemd/system/var-swap-swapfile.swap \
+    /usr/lib/tmpfiles.d/systemd-sleep-state.conf; do
+    if [ ! -f "$f" ]; then
+        echo "check-build: missing $f" >&2
+        exit 1
+    fi
+done
+# Without the condition the unit fails at every boot on machines with no file.
+if ! grep -qx 'ConditionPathExists=/var/swap/swapfile' \
+    /usr/lib/systemd/system/var-swap-swapfile.swap; then
+    echo "check-build: var-swap-swapfile.swap is not conditioned on the swap file" >&2
+    exit 1
+fi
+test -L /usr/lib/systemd/system/swap.target.wants/var-swap-swapfile.swap
+test -x /usr/bin/enable-hibernation
+# logind and systemd-sleep are denied a swap file that is not swapfile_t.
+if [[ "$(matchpathcon -n /var/swap/swapfile)" != *:swapfile_t:* ]]; then
+    echo "check-build: /var/swap/swapfile would not be labelled swapfile_t" >&2
+    exit 1
+fi
+
+### 9. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
-### 9. Report the best-effort freeworld VA-API drivers (never fails)
+### 10. Report the best-effort freeworld VA-API drivers (never fails)
 # build.sh installs them only when RPMfusion has a build matching Fedora's mesa,
 # so their absence is expected at times.
 if rpm -q mesa-va-drivers-freeworld; then
