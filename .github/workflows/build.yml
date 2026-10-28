@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - main
+    # Docs-only changes (README.md, CLAUDE.md, docs/) can't change the image.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   schedule:
     - cron: '05 10 * * 2'  # 10:05am UTC every Tuesday
   push:
@@ -11,7 +15,8 @@ on:
       - main
       - sway-atomic
     paths-ignore:
-      - '**/README.md'
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
     inputs:
       source_tag:
