@@ -116,4 +116,13 @@ fi
 ### 8. bootc image lint (warnings are non-fatal; real errors fail the build)
 bootc container lint
 
+### 9. Report the best-effort freeworld VA-API drivers (never fails)
+# build.sh installs them only when RPMfusion has a build matching Fedora's mesa,
+# so their absence is expected at times.
+if rpm -q mesa-va-drivers-freeworld; then
+    echo "check-build: mesa-va-drivers-freeworld installed (H.264/HEVC VA-API)"
+else
+    echo "check-build: WARNING: mesa-va-drivers-freeworld not installed; no H.264/HEVC VA-API"
+fi
+
 echo "check-build: all checks passed"

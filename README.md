@@ -6,7 +6,7 @@ A signed Fedora atomic OCI image: a recreation of the discontinued [ublue `sway-
 
 | Image | Tags | Contents |
 |-------|------|----------|
-| [`ghcr.io/fbunt/sericea-main`][pkg-base] | `:latest`, `:44`, `:YYYYMMDD` | Fedora `sway-atomic` + RPMfusion media stack (ffmpeg full codecs) + the [ublue `sway-atomic-main`][ublue-overlay] overlay + custom tools (Docker daemon stack, libvirt + virt-manager, neovim, gparted, …). |
+| [`ghcr.io/fbunt/sericea-main`][pkg-base] | `:latest`, `:44`, `:YYYYMMDD` | Fedora `sway-atomic` + RPMfusion media stack (ffmpeg full codecs, best-effort H.264/HEVC VA-API) + the [ublue `sway-atomic-main`][ublue-overlay] overlay + custom tools (Docker daemon stack, libvirt + virt-manager, neovim, gparted, …). |
 | [`ghcr.io/fbunt/sericea-main-nvidia`][pkg-nvidia] | `:latest`, `:44`, `:YYYYMMDD` | The base image + `akmod-nvidia-580xx` (proprietary, compiled in-image), CUDA, and the libva-nvidia bridge. Pre-Turing GPUs aren't supported by NVIDIA's open kernel modules, so this image deliberately ships the proprietary kmod; the driver branch is a build arg so an `-open` variant for a Turing+ card is a one-line CI dispatch. |
 
 Each image publishes `:latest` (current Fedora), a Fedora-major tag (e.g. `:44`) for version-pinned references, and a `:YYYYMMDD` snapshot per successful build.
@@ -64,7 +64,7 @@ Each non-PR build signs with **cosign v2.4.1** — pinned because v3 writes OCI 
 
 Non-obvious gotchas worth knowing before changing the build. Full prose is in [`CLAUDE.md`](./CLAUDE.md).
 
-- Don't swap mesa to RPMfusion's `mesa-*-freeworld` drivers — they exact-version-pin Fedora's `mesa-filesystem` and depsolve drift hard-fails the build. `build.sh` intentionally swaps only the ffmpeg stack.
+- RPMfusion's `mesa-va-drivers-freeworld` (H.264/HEVC VA-API, which Fedora's mesa lacks) is best-effort: it exact-version-pins Fedora's `mesa-filesystem`, so `build.sh` installs it only when RPMfusion has a build matching the base image's mesa and otherwise warns and ships without it. Don't make it required or add `mesa-vulkan-drivers-freeworld`.
 - The NVIDIA variant must build the **proprietary** kmod. RPMfusion's 580xx kmod spec auto-detects the GPU to choose open vs proprietary, and on a headless CI runner that picks open — which doesn't support pre-Turing GPUs. `build-nvidia.sh` defines `_without_kmod_nvidia_detect` to skip the detection, and `check-build-nvidia.sh` asserts the built kmod's license so a wrong variant fails the build, not the boot.
 - Every `RUN` layer in the `Containerfile`s must end with `ostree container commit`.
 - Never commit `cosign.key` — only `cosign.pub` belongs in the repo.
