@@ -35,16 +35,21 @@ All of it is inert on a machine that never runs `enable-hibernation`:
   keeps its battery discharge-rate estimate. SELinux does not let
   systemd-sleep create that directory itself; without it systemd-sleep logs
   "Failed to update ... Permission denied" and assumes a fixed 1h estimate.
-- `unmount-cifs-around-sleep.service`, wanted by `sleep.target`. A mounted
-  CIFS share can make every sleep fail: when the laptop wakes to hibernate,
-  cifs background work hangs on the network that sleep took down, the kernel
-  gives up freezing tasks ("Freezing remaining freezable tasks failed ...
-  workqueue cifsiod"), and systemd-sleep logs "Failed to put system to sleep.
-  System resumed again: Device or resource busy" on every retry. Before sleep
-  the service stops the automount units of CIFS fstab entries (otherwise gvfs
-  re-triggers the mount immediately) and force-unmounts all CIFS shares. On
-  resume it restarts those automounts, so the shares come back on first
-  access. It does nothing without CIFS mounts.
+- The NetworkManager dispatcher hook
+  `/usr/lib/NetworkManager/dispatcher.d/50-cifs-unmount`. A CIFS share still
+  mounted at sleep makes every sleep fail: cifs background work hangs on the
+  network that sleep took down, the kernel gives up freezing tasks ("Freezing
+  remaining freezable tasks failed ... workqueue cifsiod"), and systemd-sleep
+  logs "Failed to put system to sleep. System resumed again: Device or
+  resource busy" on every retry. NetworkManager runs the hook, and waits for
+  it, before it disconnects for sleep (or any deliberate disconnect). The
+  hook stops the automount units of CIFS fstab entries, which also unmounts
+  them, while the server is still reachable. On the next "up" it restarts
+  those automounts, so the shares come back on first access. It logs under
+  `cifs-unmount` and does nothing without CIFS mounts. A unit ordered before
+  `sleep.target` would be too late: NetworkManager has already dropped the
+  network by then, and the unmount blocks for CIFS's 180-second server
+  timeout with the machine stuck half-asleep.
 - `/usr/bin/enable-hibernation`, the setup command below.
 
 There are no `resume=` kernel arguments. systemd-sleep stores the swap

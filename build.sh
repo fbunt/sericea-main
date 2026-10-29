@@ -394,60 +394,58 @@ cat > /usr/lib/tmpfiles.d/systemd-sleep-state.conf <<'EOF'
 # itself is not allowed to create it.
 d /var/lib/systemd/sleep 0755 root root -
 EOF
-# A mounted CIFS share can make every sleep fail: when the laptop wakes to
-# hibernate, cifs background work (cifsiod, a freezable workqueue) blocks on the
-# network that sleep took down, the kernel gives up freezing tasks after 20 s
-# ("Device or resource busy"), and logind keeps retrying. So unmount CIFS shares
-# before any sleep: -f aborts hung requests, -l detaches even if something is
-# still inside. Automount units for them are stopped first, or gvfs re-triggers
-# the mount within milliseconds of the unmount, and restarted after resume so
-# the shares come back on first access. A no-op without CIFS mounts.
-cat > /usr/libexec/cifs-sleep <<'EOF'
+# A CIFS share still mounted at sleep makes the sleep fail: cifs background work
+# (cifsiod, a freezable workqueue) blocks on the network that sleep took down,
+# the kernel gives up freezing tasks ("Device or resource busy"), and logind
+# keeps retrying. Unmounting from a sleep.target unit is too late: NetworkManager
+# drops the network as soon as logind announces sleep, before sleep.target, and
+# the unmount then blocks for CIFS's 180 s server timeout with the machine stuck
+# half-asleep. NetworkManager runs pre-down dispatcher scripts and waits for
+# them before disconnecting, sleep included, so unmount there.
+mkdir -p /usr/lib/NetworkManager/dispatcher.d/pre-down.d
+cat > /usr/lib/NetworkManager/dispatcher.d/50-cifs-unmount <<'EOF'
 #!/bin/sh
-# cifs-sleep pre|post: see unmount-cifs-around-sleep.service.
-state=/run/cifs-sleep-automounts
-case "$1" in
-pre)
-    : >"$state"
+# NetworkManager dispatcher hook: unmount CIFS shares while the network is
+# still up. NetworkManager runs pre-down scripts (linked from pre-down.d) and
+# waits for them before disconnecting, including when the system goes to
+# sleep; unmounting after the network is gone blocks until CIFS times out.
+# Automount units are stopped too, so nothing remounts while the network is
+# down, and started again on the next "up".
+state=/run/cifs-network-automounts
+case "$2" in
+pre-down)
     findmnt -s -n -r -t cifs -o TARGET,OPTIONS | while read -r target opts; do
         case ",$opts," in
         *,x-systemd.automount,*)
             unit="$(systemd-escape -p --suffix=automount "$target")"
             if systemctl -q is-active "$unit" && systemctl stop "$unit"; then
                 echo "$unit" >>"$state"
+                logger -t cifs-unmount "stopped $unit"
             fi
             ;;
         esac
     done
-    umount -a -f -l -t cifs
+    findmnt -n -r -t cifs -o TARGET | while read -r target; do
+        unit="$(systemd-escape -p --suffix=mount "$target")"
+        if systemctl stop "$unit"; then
+            logger -t cifs-unmount "unmounted $target"
+        else
+            umount -l "$target" && logger -t cifs-unmount "lazily unmounted $target"
+        fi
+    done
     ;;
-post)
-    [ -s "$state" ] && xargs systemctl start <"$state"
+up)
+    if [ -s "$state" ]; then
+        xargs systemctl start <"$state" && logger -t cifs-unmount "restarted $(tr '\n' ' ' <"$state")"
+    fi
     rm -f "$state"
     ;;
 esac
 exit 0
 EOF
-chmod 0755 /usr/libexec/cifs-sleep
-# StopWhenUnneeded: ExecStop runs once sleep.target is left on resume.
-cat > /usr/lib/systemd/system/unmount-cifs-around-sleep.service <<'EOF'
-[Unit]
-Description=Unmount CIFS shares before sleep, restore their automounts after
-Before=sleep.target
-StopWhenUnneeded=yes
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/libexec/cifs-sleep pre
-ExecStop=/usr/libexec/cifs-sleep post
-
-[Install]
-WantedBy=sleep.target
-EOF
-mkdir -p /usr/lib/systemd/system/sleep.target.wants
-ln -sf ../unmount-cifs-around-sleep.service \
-    /usr/lib/systemd/system/sleep.target.wants/unmount-cifs-around-sleep.service
+chmod 0755 /usr/lib/NetworkManager/dispatcher.d/50-cifs-unmount
+ln -sf ../50-cifs-unmount \
+    /usr/lib/NetworkManager/dispatcher.d/pre-down.d/50-cifs-unmount
 install -m 0755 /tmp/enable-hibernation /usr/bin/enable-hibernation
 
 

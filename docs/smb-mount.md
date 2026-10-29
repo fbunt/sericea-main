@@ -65,10 +65,12 @@ findmnt /var/mnt/phone   # an autofs line, plus a cifs line while mounted
   the share never stays unmounted.
 
 CIFS mounts are `soft` by default, so losing the server mid-use gives I/O
-errors rather than hung processes. Before any sleep the image force-unmounts
-CIFS shares and pauses their automounts, then restores the automounts on
-resume (`unmount-cifs-around-sleep.service`, see `docs/hibernation.md`). A
-share left mounted would otherwise block hibernation.
+errors rather than hung processes. Before NetworkManager disconnects, for
+sleep or a deliberate disconnect, the image unmounts CIFS shares and pauses
+their automounts, then restores the automounts when the network is back (the
+`50-cifs-unmount` dispatcher hook, see `docs/hibernation.md`). A share left
+mounted would otherwise block sleep and hibernation. A Wi-Fi signal that
+simply fades gives no warning, so the hook can't run then.
 
 Add `ro,` at the start of the options for a read-only mount.
 
