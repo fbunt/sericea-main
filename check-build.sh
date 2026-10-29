@@ -137,9 +137,9 @@ if ! grep -qx 'ConditionPathExists=/var/swap/swapfile' \
 fi
 test -L /usr/lib/systemd/system/swap.target.wants/var-swap-swapfile.swap
 test -x /usr/bin/enable-hibernation
-# A mounted CIFS share otherwise blocks the freeze and every sleep fails.
-test -L /usr/lib/systemd/system/sleep.target.wants/unmount-cifs-around-sleep.service
-test -x /usr/libexec/cifs-sleep
+# A CIFS share still mounted at sleep blocks the freeze and every sleep fails.
+test -x /usr/lib/NetworkManager/dispatcher.d/50-cifs-unmount
+test -L /usr/lib/NetworkManager/dispatcher.d/pre-down.d/50-cifs-unmount
 # logind and systemd-sleep are denied a swap file that is not swapfile_t.
 if [[ "$(matchpathcon -n /var/swap/swapfile)" != *:swapfile_t:* ]]; then
     echo "check-build: /var/swap/swapfile would not be labelled swapfile_t" >&2
