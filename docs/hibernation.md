@@ -35,6 +35,16 @@ All of it is inert on a machine that never runs `enable-hibernation`:
   keeps its battery discharge-rate estimate. SELinux does not let
   systemd-sleep create that directory itself; without it systemd-sleep logs
   "Failed to update ... Permission denied" and assumes a fixed 1h estimate.
+- `unmount-cifs-around-sleep.service`, wanted by `sleep.target`. A mounted
+  CIFS share can make every sleep fail: when the laptop wakes to hibernate,
+  cifs background work hangs on the network that sleep took down, the kernel
+  gives up freezing tasks ("Freezing remaining freezable tasks failed ...
+  workqueue cifsiod"), and systemd-sleep logs "Failed to put system to sleep.
+  System resumed again: Device or resource busy" on every retry. Before sleep
+  the service stops the automount units of CIFS fstab entries (otherwise gvfs
+  re-triggers the mount immediately) and force-unmounts all CIFS shares. On
+  resume it restarts those automounts, so the shares come back on first
+  access. It does nothing without CIFS mounts.
 - `/usr/bin/enable-hibernation`, the setup command below.
 
 There are no `resume=` kernel arguments. systemd-sleep stores the swap

@@ -394,6 +394,60 @@ cat > /usr/lib/tmpfiles.d/systemd-sleep-state.conf <<'EOF'
 # itself is not allowed to create it.
 d /var/lib/systemd/sleep 0755 root root -
 EOF
+# A mounted CIFS share can make every sleep fail: when the laptop wakes to
+# hibernate, cifs background work (cifsiod, a freezable workqueue) blocks on the
+# network that sleep took down, the kernel gives up freezing tasks after 20 s
+# ("Device or resource busy"), and logind keeps retrying. So unmount CIFS shares
+# before any sleep: -f aborts hung requests, -l detaches even if something is
+# still inside. Automount units for them are stopped first, or gvfs re-triggers
+# the mount within milliseconds of the unmount, and restarted after resume so
+# the shares come back on first access. A no-op without CIFS mounts.
+cat > /usr/libexec/cifs-sleep <<'EOF'
+#!/bin/sh
+# cifs-sleep pre|post: see unmount-cifs-around-sleep.service.
+state=/run/cifs-sleep-automounts
+case "$1" in
+pre)
+    : >"$state"
+    findmnt -s -n -r -t cifs -o TARGET,OPTIONS | while read -r target opts; do
+        case ",$opts," in
+        *,x-systemd.automount,*)
+            unit="$(systemd-escape -p --suffix=automount "$target")"
+            if systemctl -q is-active "$unit" && systemctl stop "$unit"; then
+                echo "$unit" >>"$state"
+            fi
+            ;;
+        esac
+    done
+    umount -a -f -l -t cifs
+    ;;
+post)
+    [ -s "$state" ] && xargs systemctl start <"$state"
+    rm -f "$state"
+    ;;
+esac
+exit 0
+EOF
+chmod 0755 /usr/libexec/cifs-sleep
+# StopWhenUnneeded: ExecStop runs once sleep.target is left on resume.
+cat > /usr/lib/systemd/system/unmount-cifs-around-sleep.service <<'EOF'
+[Unit]
+Description=Unmount CIFS shares before sleep, restore their automounts after
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/cifs-sleep pre
+ExecStop=/usr/libexec/cifs-sleep post
+
+[Install]
+WantedBy=sleep.target
+EOF
+mkdir -p /usr/lib/systemd/system/sleep.target.wants
+ln -sf ../unmount-cifs-around-sleep.service \
+    /usr/lib/systemd/system/sleep.target.wants/unmount-cifs-around-sleep.service
 install -m 0755 /tmp/enable-hibernation /usr/bin/enable-hibernation
 
 

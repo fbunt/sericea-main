@@ -31,7 +31,7 @@ Mount point and fstab entry:
 
 ```bash
 sudo mkdir -p /var/mnt/phone
-echo '//media-server.tail5003e7.ts.net/phone /var/mnt/phone cifs credentials=/etc/samba/credentials/media-server,uid=1000,gid=1000,file_mode=0644,dir_mode=0755,vers=3.1.1,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=10min,x-systemd.mount-timeout=30s 0 0' | sudo tee -a /etc/fstab
+echo '//media-server.tail5003e7.ts.net/phone /var/mnt/phone cifs credentials=/etc/samba/credentials/media-server,uid=1000,gid=1000,file_mode=0644,dir_mode=0755,vers=3.1.1,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=10min,x-systemd.mount-timeout=30s,x-gvfs-hide 0 0' | sudo tee -a /etc/fstab
 sudo systemctl daemon-reload
 sudo systemctl start var-mnt-phone.automount
 ```
@@ -60,9 +60,15 @@ findmnt /var/mnt/phone   # an autofs line, plus a cifs line while mounted
 - `nofail`, `_netdev`, `x-systemd.mount-timeout=30s`: boot doesn't wait on
   the share, and an unreachable server fails within 30 s instead of hanging.
 
+- `x-gvfs-hide`: keeps gvfs from listing and probing the share. Without it,
+  gvfs re-triggers the automount in the same second as each idle unmount, so
+  the share never stays unmounted.
+
 CIFS mounts are `soft` by default, so losing the server mid-use gives I/O
-errors rather than hung processes. The idle unmount also means the share is
-usually unmounted when the laptop suspends.
+errors rather than hung processes. Before any sleep the image force-unmounts
+CIFS shares and pauses their automounts, then restores the automounts on
+resume (`unmount-cifs-around-sleep.service`, see `docs/hibernation.md`). A
+share left mounted would otherwise block hibernation.
 
 Add `ro,` at the start of the options for a read-only mount.
 
