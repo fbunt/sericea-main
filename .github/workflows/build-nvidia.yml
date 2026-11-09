@@ -200,7 +200,7 @@ jobs:
 
       # Pin cosign to v2.x (v3 writes OCI 1.1 referrer bundles that Fedora's
       # containers/image cannot read — see build.yml for the full rationale).
-      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: sigstore/cosign-installer@v4.1.3
         if: github.event_name != 'pull_request'
         with:
           cosign-release: 'v2.4.1'
