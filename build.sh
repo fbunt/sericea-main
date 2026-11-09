@@ -7,15 +7,16 @@ RELEASE="$(rpm -E %fedora)"
 
 ### Enable RPMfusion (required for ffmpeg/codec packages below)
 # mirrors.rpmfusion.org is a MirrorBrain redirector whose GeoDNS chain
-# occasionally fails to resolve from CI runners. Retry only on DNS-failure
-# signatures so depsolve/signing breaks still fail fast instead of being
-# masked by the loop.
+# occasionally fails to resolve from CI runners, and the mirror it hands out
+# sometimes stalls until the download times out. Retry only on those
+# DNS-failure and timeout signatures so depsolve/signing breaks still fail fast
+# instead of being masked by the loop.
 for i in 1 2 3; do
     rpm-ostree install \
         "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${RELEASE}.noarch.rpm" \
         "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${RELEASE}.noarch.rpm" \
         2> >(tee /tmp/rpmfusion.err >&2) && break
-    grep -qE "dns error|Name or service not known" /tmp/rpmfusion.err || exit 1
+    grep -qE "dns error|Name or service not known|timed out" /tmp/rpmfusion.err || exit 1
     [ "$i" -eq 3 ] && exit 1
     sleep $((i * 10))
 done
@@ -41,11 +42,22 @@ rpm-ostree override remove "${STRIPPED[@]}" \
 
 ### Additive RPMfusion codec packages
 # These coexist alongside their Fedora -free counterparts and add patent-
-# encumbered codec support (AAC encode, HEIF/HEVC decode, MP3, etc).
+# encumbered codec support (AAC encode, MP3, etc).
 rpm-ostree install \
     gstreamer1-plugins-bad-freeworld \
-    gstreamer1-plugins-ugly \
-    libheif-freeworld
+    gstreamer1-plugins-ugly
+
+
+### Best-effort HEIF/HEVC image decode (RPMfusion libheif-freeworld)
+# libheif-freeworld exact-pins libheif to its own version, and RPMfusion's build
+# often lags Fedora's libheif update, which then fails the depsolve. Same
+# approach as mesa-va-drivers-freeworld below: request only the build matching
+# the installed libheif, and warn instead of failing when there is none, so the
+# image ships without HEVC-coded HEIF support until RPMfusion catches up.
+if ! LIBHEIF_VERSION="$(rpm -q --queryformat '%{VERSION}\n' libheif | head -n1)" ||
+    ! rpm-ostree install "libheif-freeworld-${LIBHEIF_VERSION}"; then
+    echo "WARNING: installing libheif-freeworld matching libheif '${LIBHEIF_VERSION}' failed (no matching RPMfusion build, depsolve or mirror error); image ships without HEVC HEIF decode"
+fi
 
 
 ### Best-effort H.264/HEVC VA-API drivers (RPMfusion mesa-va-drivers-freeworld)
