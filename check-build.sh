@@ -158,4 +158,12 @@ else
     echo "check-build: WARNING: mesa-va-drivers-freeworld not installed; no H.264/HEVC VA-API"
 fi
 
+### 11. Report the best-effort libheif-freeworld (never fails)
+# build.sh installs it only when RPMfusion has a build matching Fedora's libheif.
+if rpm -q libheif-freeworld; then
+    echo "check-build: libheif-freeworld installed (HEVC HEIF decode)"
+else
+    echo "check-build: WARNING: libheif-freeworld not installed; no HEVC HEIF decode"
+fi
+
 echo "check-build: all checks passed"
