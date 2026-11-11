@@ -180,6 +180,27 @@ ln -sf ../tailscaled.service \
     /usr/lib/systemd/system/multi-user.target.wants/tailscaled.service
 
 
+### Pixi (conda-ecosystem package and environment manager)
+# Not packaged by Fedora, RPMfusion or Terra; install the static musl binary from
+# the latest GitHub release, so each image build picks up the current version.
+# The .sha256 comes from the same release, so it catches a corrupt or truncated
+# download, not a tampered release. `pixi self-update` cannot write to /usr;
+# updates arrive with the image.
+PIXI_DIR="$(mktemp -d)"
+PIXI_URL="https://github.com/prefix-dev/pixi/releases/latest/download/pixi-x86_64-unknown-linux-musl.tar.gz"
+curl -fsSL --retry 3 -o "${PIXI_DIR}/pixi-x86_64-unknown-linux-musl.tar.gz" "${PIXI_URL}"
+curl -fsSL --retry 3 -o "${PIXI_DIR}/pixi.sha256" "${PIXI_URL}.sha256"
+(cd "${PIXI_DIR}" && sha256sum -c pixi.sha256)
+tar -xzf "${PIXI_DIR}/pixi-x86_64-unknown-linux-musl.tar.gz" -C "${PIXI_DIR}" pixi
+install -m 0755 "${PIXI_DIR}/pixi" /usr/bin/pixi
+rm -rf "${PIXI_DIR}"
+mkdir -p /usr/share/bash-completion/completions /usr/share/zsh/site-functions \
+    /usr/share/fish/vendor_completions.d
+pixi completion --shell bash >/usr/share/bash-completion/completions/pixi
+pixi completion --shell zsh >/usr/share/zsh/site-functions/_pixi
+pixi completion --shell fish >/usr/share/fish/vendor_completions.d/pixi.fish
+
+
 ### Keep firmware update metadata current
 # Fedora doesn't enable fwupd-refresh.timer, so without it fwupdmgr never
 # downloads LVFS metadata and reports no BIOS/EC updates even when Lenovo has

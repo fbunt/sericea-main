@@ -38,6 +38,8 @@ fi
 test -L /usr/lib/systemd/system/multi-user.target.wants/tailscaled.service
 # Without the refresh timer fwupdmgr never sees published firmware updates.
 test -L /usr/lib/systemd/system/timers.target.wants/fwupd-refresh.timer
+# Pixi is a release binary, not an RPM, so rpm -q above cannot see it.
+/usr/bin/pixi --version
 
 ### 2. Signature policy must be valid and enforcing (default: reject)
 python3 - <<'PY'

@@ -6,7 +6,7 @@ A signed Fedora atomic OCI image: a recreation of the discontinued [ublue `sway-
 
 | Image | Tags | Contents |
 |-------|------|----------|
-| [`ghcr.io/fbunt/sericea-main`][pkg-base] | `:latest`, `:44`, `:YYYYMMDD` | Fedora `sway-atomic` + RPMfusion media stack (ffmpeg full codecs, best-effort H.264/HEVC VA-API) + the [ublue `sway-atomic-main`][ublue-overlay] overlay + custom tools (Docker daemon stack, libvirt + virt-manager, neovim, gparted, …). |
+| [`ghcr.io/fbunt/sericea-main`][pkg-base] | `:latest`, `:44`, `:YYYYMMDD` | Fedora `sway-atomic` + RPMfusion media stack (ffmpeg full codecs, best-effort H.264/HEVC VA-API) + the [ublue `sway-atomic-main`][ublue-overlay] overlay + custom tools (Docker daemon stack, libvirt + virt-manager, neovim, pixi, gparted, …). |
 | [`ghcr.io/fbunt/sericea-main-nvidia`][pkg-nvidia] | `:latest`, `:44`, `:YYYYMMDD` | The base image + `akmod-nvidia-580xx` (proprietary, compiled in-image), CUDA, and the libva-nvidia bridge. Pre-Turing GPUs aren't supported by NVIDIA's open kernel modules, so this image deliberately ships the proprietary kmod; the driver branch is a build arg so an `-open` variant for a Turing+ card is a one-line CI dispatch. |
 
 Each image publishes `:latest` (current Fedora), a Fedora-major tag (e.g. `:44`) for version-pinned references, and a `:YYYYMMDD` snapshot per successful build.
